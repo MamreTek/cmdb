@@ -8,16 +8,14 @@ async function choose(page: Page, label: string, value: string) {
   const popup = page
     .locator('.ant-select-dropdown')
     .filter({ has: page.locator(`[id="${listId}"]`) });
-  await popup
-    .locator('.ant-select-item-option')
-    .filter({
-      has: page.locator('.ant-select-item-option-content', {
-        hasText: new RegExp(
-          `^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
-        ),
-      }),
-    })
-    .click();
+  const option = popup.locator('.ant-select-item-option').filter({
+    has: page.locator('.ant-select-item-option-content', {
+      hasText: new RegExp(`^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+    }),
+  });
+  await option.hover();
+  await expect(option).toHaveClass(/ant-select-item-option-active/);
+  await control.press('Enter');
   await expect(popup).not.toBeVisible();
 }
 

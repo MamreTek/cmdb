@@ -6,16 +6,16 @@ async function selectType(page: Page, control: Locator, name: string) {
   const popup = page
     .locator('.ant-select-dropdown')
     .filter({ has: page.locator(`[id="${id}"]`) });
-  await popup
-    .locator('.ant-select-item-option')
-    .filter({
-      has: page.locator('.ant-select-item-option-content', {
-        hasText: new RegExp(
-          '^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$',
-        ),
-      }),
-    })
-    .click();
+  const option = popup.locator('.ant-select-item-option').filter({
+    has: page.locator('.ant-select-item-option-content', {
+      hasText: new RegExp(
+        '^' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$',
+      ),
+    }),
+  });
+  await option.hover();
+  await expect(option).toHaveClass(/ant-select-item-option-active/);
+  await control.press('Enter');
   await expect(popup).not.toBeVisible();
 }
 
