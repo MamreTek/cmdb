@@ -77,9 +77,7 @@ describe('prototype workflows', () => {
     const dialog = within(await screen.findByRole('dialog'));
     await user.click(dialog.getByLabelText('资源模型'));
     await user.click(
-      screen.getByText('中间件', {
-        selector: '.ant-select-item-option-content',
-      }),
+      screen.getByText('中间件', { selector: '.ant-select-tree-title' }),
     );
     for (const [label, value] of Object.entries({
       资源标识: 'demo.typed-ui',

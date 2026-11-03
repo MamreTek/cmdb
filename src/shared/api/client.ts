@@ -10,6 +10,7 @@ import type {
   ImportPreview,
   ImportRequest,
   FieldChange,
+  CIClassNode,
   SchemaPreview,
   RelationRule,
   RelationRuleInput,
@@ -129,8 +130,13 @@ export class ApiClient {
   }
 
   models = () => this.request<CIModel[]>('GET', '/models');
-  createModel = (input: { id: string; name: string; description: string }) =>
-    this.request<CIModel>('POST', '/models', input);
+  classTree = () => this.request<CIClassNode[]>('GET', '/class-tree');
+  createModel = (input: {
+    id: string;
+    name: string;
+    description: string;
+    parentId?: string;
+  }) => this.request<CIModel>('POST', '/models', input);
   previewField = (id: string, input: FieldChange) =>
     this.request<SchemaPreview>(
       'POST',
@@ -144,6 +150,12 @@ export class ApiClient {
       input,
     );
   relationRules = () => this.request<RelationRule[]>('GET', '/relation-rules');
+  previewMigration = (id: string, input: FieldChange) =>
+    this.request<SchemaPreview>(
+      'POST',
+      `/models/${encodeURIComponent(id)}/fields/${encodeURIComponent(input.field.key)}/migration-preview`,
+      input,
+    );
   createRule = (input: RelationRuleInput) =>
     this.request<RelationRule>('POST', '/relation-rules', input);
   updateRule = (

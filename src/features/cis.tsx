@@ -3,6 +3,7 @@ import {
   App,
   Button,
   Card,
+  Checkbox,
   Input,
   Modal,
   Popconfirm,
@@ -61,6 +62,8 @@ export function CIsPage() {
     attributeValue: params.has('attributeValue')
       ? params.get('attributeValue')!
       : undefined,
+    includeDescendants:
+      params.get('includeDescendants') === 'true' ? 'true' : undefined,
   };
   const queryKey = JSON.stringify(query);
   const resource = useResource(() => api.list(query), queryKey);
@@ -221,6 +224,7 @@ export function CIsPage() {
                   modelId: value,
                   attributeKey: undefined,
                   attributeValue: undefined,
+                  includeDescendants: undefined,
                 })
               }
             />
@@ -261,6 +265,17 @@ export function CIsPage() {
             />
           </div>
           <div className="query-actions">
+            <Checkbox
+              disabled={!query.modelId}
+              checked={query.includeDescendants === 'true'}
+              onChange={(event) =>
+                updateQuery({
+                  includeDescendants: event.target.checked ? 'true' : undefined,
+                })
+              }
+            >
+              包含子类
+            </Checkbox>
             <Button
               onClick={() =>
                 updateQuery({
@@ -268,6 +283,7 @@ export function CIsPage() {
                   modelId: undefined,
                   environment: undefined,
                   status: undefined,
+                  includeDescendants: undefined,
                   owner: undefined,
                   attributeKey: undefined,
                   attributeValue: undefined,
@@ -323,7 +339,12 @@ export function CIsPage() {
               key={`${query.modelId}-${query.attributeKey}-${query.attributeValue ?? ''}`}
               disabled={!query.attributeKey}
               defaultValue={query.attributeValue}
-              maxLength={120}
+              maxLength={
+                models.data
+                  ?.find((model) => model.id === query.modelId)
+                  ?.fields.find((field) => field.key === query.attributeKey)
+                  ?.maxLength ?? 120
+              }
               placeholder="布尔填 true/false，引用填 CI ID"
               onSearch={(value) =>
                 updateQuery({ attributeValue: value.trim() })

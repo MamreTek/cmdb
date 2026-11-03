@@ -26,8 +26,16 @@ import {
   uniqueAttributes,
   modelField,
   relationRuleValid,
+  timestampValue,
 } from './validation';
 import { previewImport, importRequest, importSignature } from './imports';
+import {
+  classLineage,
+  classTree,
+  effectiveFields,
+  isWithinClass,
+  publicModel,
+} from './class-schema';
 
 function pageParams(params: URLSearchParams): {
   page: number;
@@ -168,10 +176,15 @@ export function createMockApi(options: { latency?: number } = {}) {
     const pathname = url.pathname,
       params = url.searchParams;
     if (method === 'GET' && pathname === '/api/v1/models')
-      return { status: 200, data: models };
+      return {
+        status: 200,
+        data: models.map((model) => publicModel(model, models)),
+      };
+    if (method === 'GET' && pathname === '/api/v1/class-tree')
+      return { status: 200, data: classTree(models) };
     if (method === 'POST' && pathname === '/api/v1/models') {
       const value = object(body);
-      onlyKeys(value, ['id', 'name', 'description']);
+      onlyKeys(value, ['id', 'name', 'description', 'parentId']);
       const modelId = stringField(value.id, 'id', 2, 40);
       if (
         !/^[a-z][a-z0-9_]+$/.test(modelId) ||
@@ -181,6 +194,16 @@ export function createMockApi(options: { latency?: number } = {}) {
       if (models.some((model) => model.id === modelId))
         throw new Problem(409, 'DUPLICATE_MODEL', '模型标识已存在');
       if (models.length >= 20) bad('原型最多 20 个模型');
+      const parentId =
+        value.parentId === undefined
+          ? undefined
+          : choice(
+              value.parentId,
+              models.map((model) => model.id),
+              'parentId',
+            );
+      if (parentId && classLineage(parentId, models).length >= 6)
+        bad('CI Class 原型最多6层');
       const model: CIModel = {
         id: modelId,
         name: stringField(value.name, 'name', 2, 40),
@@ -192,48 +215,94 @@ export function createMockApi(options: { latency?: number } = {}) {
         ),
         fields: [],
         revision: 1,
+        ...(parentId ? { parentId } : {}),
       };
       models.push(model);
-      return { status: 201, data: model };
+      return { status: 201, data: publicModel(model, models) };
     }
     const fieldMatch = /^\/api\/v1\/models\/([^/]+)\/fields(\/preview)?$/.exec(
       pathname,
     );
-    if (method === 'POST' && fieldMatch) {
-      const model = models.find(
-        (model) => model.id === decodeURIComponent(fieldMatch[1]!),
+    const migrationMatch =
+      /^\/api\/v1\/models\/([^/]+)\/fields\/([^/]+)\/migration-preview$/.exec(
+        pathname,
       );
+    if (method === 'POST' && (fieldMatch || migrationMatch)) {
+      const modelId = decodeURIComponent((fieldMatch ?? migrationMatch)![1]!);
+      const model = models.find((model) => model.id === modelId);
       if (!model) throw new Problem(404, 'NOT_FOUND', '模型不存在');
       const value = object(body);
       onlyKeys(value, ['revision', 'field']);
       if (value.revision !== model.revision)
         throw new Problem(409, 'REVISION_CONFLICT', '模型已更新，请刷新后重试');
       const field = modelField(value.field, models, store.cis);
-      if (model.fields.some((item) => item.key === field.key))
-        bad('字段标识已存在');
-      if (model.fields.length >= 25) bad('原型每个模型最多 25 个字段');
-      const changed = {
-        ...model,
-        fields: [...model.fields, field],
-        revision: model.revision! + 1,
-      };
-      const schemas = models.map((item) =>
-        item.id === model.id ? changed : item,
+      const affected = models.filter((item) =>
+        isWithinClass(item.id, model.id, models),
       );
-      const preview: SchemaPreview = { total: 0, backfillCount: 0, errors: [] };
+      if (migrationMatch) {
+        if (
+          field.key !== decodeURIComponent(migrationMatch[2]!) ||
+          !model.fields.some((item) => item.key === field.key)
+        )
+          bad('只可预览本类声明字段，标识固定，继承字段请在声明类操作');
+      } else if (
+        affected.some((item) =>
+          effectiveFields(item.id, models).some(
+            (item) => item.key === field.key,
+          ),
+        )
+      )
+        bad('字段标识与本类、祖先或子类字段冲突，不允许覆盖继承字段');
+      const schemas = models.map((item) => {
+        if (!affected.some((affected) => affected.id === item.id)) return item;
+        return {
+          ...item,
+          revision: item.revision! + 1,
+          fields:
+            item.id === model.id
+              ? migrationMatch
+                ? item.fields.map((item) =>
+                    item.key === field.key ? field : item,
+                  )
+                : [...item.fields, field]
+              : item.fields,
+        };
+      });
+      if (
+        affected.some((item) => effectiveFields(item.id, schemas).length > 25)
+      )
+        bad('本类或子类有效字段超过原型25字段上限');
+      const preview: SchemaPreview = {
+        total: 0,
+        backfillCount: 0,
+        errors: [],
+        affectedClasses: affected.map((item) => ({
+          id: item.id,
+          name: item.name,
+          revision: item.revision!,
+          ciCount: store.cis.filter((ci) => ci.modelId === item.id).length,
+        })),
+        ...(migrationMatch ? { changes: [] } : {}),
+      };
       const replacements: CI[] = [];
-      for (const ci of store.cis.filter((ci) => ci.modelId === model.id)) {
+      const untouched = store.cis.filter(
+        (ci) => !isWithinClass(ci.modelId, model.id, models),
+      );
+      for (const ci of store.cis.filter((ci) =>
+        isWithinClass(ci.modelId, model.id, models),
+      )) {
         preview.total++;
         try {
-          const {
-            externalKey,
-            name,
-            modelId,
-            owner,
-            environment,
-            status,
-            attributes,
-          } = ci;
+          const { externalKey, name, modelId, owner, environment, status } = ci;
+          const attributes = { ...ci.attributes };
+          // A preview may parse an exact numeric string, but never truncates data.
+          if (
+            migrationMatch &&
+            field.type === 'integer' &&
+            typeof attributes[field.key] === 'string' &&
+            /^-?(0|[1-9]\d*)$/.test(String(attributes[field.key]))
+          )
+            attributes[field.key] = Number(attributes[field.key]);
           const normalized = ciInput(
             {
               externalKey,
@@ -248,16 +317,34 @@ export function createMockApi(options: { latency?: number } = {}) {
             store.cis,
             ci,
           );
-          uniqueAttributes(normalized, schemas, replacements, ci.id);
-          const backfilled =
-            JSON.stringify(normalized.attributes) !==
-            JSON.stringify(ci.attributes);
-          if (backfilled) preview.backfillCount++;
+          uniqueAttributes(
+            normalized,
+            schemas,
+            [...untouched, ...replacements],
+            ci.id,
+          );
+          const changed = [
+            ...new Set([
+              ...Object.keys(normalized.attributes),
+              ...Object.keys(ci.attributes),
+            ]),
+          ].some((key) => normalized.attributes[key] !== ci.attributes[key]);
+          if (changed) preview.backfillCount++;
+          if (
+            migrationMatch &&
+            normalized.attributes[field.key] !== ci.attributes[field.key]
+          )
+            preview.changes!.push({
+              externalKey: ci.externalKey,
+              modelId: ci.modelId,
+              before: ci.attributes[field.key] ?? null,
+              after: normalized.attributes[field.key] ?? null,
+            });
           replacements.push({
             ...ci,
             ...normalized,
-            revision: ci.revision + (backfilled ? 1 : 0),
-            updatedAt: backfilled ? new Date().toISOString() : ci.updatedAt,
+            revision: ci.revision + (changed ? 1 : 0),
+            updatedAt: changed ? new Date().toISOString() : ci.updatedAt,
           });
         } catch (error) {
           if (!(error instanceof Problem)) throw error;
@@ -269,10 +356,11 @@ export function createMockApi(options: { latency?: number } = {}) {
           });
         }
       }
-      if (fieldMatch[2]) return { status: 200, data: preview };
+      if (migrationMatch || fieldMatch![2])
+        return { status: 200, data: preview };
       if (preview.errors.length)
-        bad('模型变更与存量数据不兼容，请先修复或调整默认值');
-      models[models.indexOf(model)] = changed;
+        bad('模型变更与本类或子类存量数据不兼容，未修改任何模型或资源');
+      models = schemas;
       for (const ci of replacements) {
         const previous = findCI(ci.id);
         store.cis[store.cis.indexOf(previous)] = ci;
@@ -280,10 +368,16 @@ export function createMockApi(options: { latency?: number } = {}) {
           log(
             ci.id,
             'schema_backfilled',
-            `模型字段 ${field.label} 默认值回填 · 版本 ${ci.revision}`,
+            '模型字段 ' + field.label + ' 默认值回填 · 版本 ' + ci.revision,
           );
       }
-      return { status: 201, data: changed };
+      return {
+        status: 201,
+        data: publicModel(
+          models.find((item) => item.id === model.id)!,
+          models,
+        ),
+      };
     }
     if (pathname === '/api/v1/relation-rules' && method === 'GET')
       return { status: 200, data: rules };
@@ -376,6 +470,7 @@ export function createMockApi(options: { latency?: number } = {}) {
         'attributeValue',
         'sortBy',
         'sortOrder',
+        'includeDescendants',
       ]);
       if (Object.values(query).some((value) => typeof value !== 'string'))
         bad('视图查询值须为字符串');
@@ -427,6 +522,7 @@ export function createMockApi(options: { latency?: number } = {}) {
         'owner',
         'attributeKey',
         'attributeValue',
+        'includeDescendants',
       ]);
       const query: CIQuery = {};
       if (params.has('modelId'))
@@ -462,23 +558,45 @@ export function createMockApi(options: { latency?: number } = {}) {
       const owner = params.has('owner')
         ? stringField(params.get('owner'), 'owner', 1, 60)
         : undefined;
-      const attributeKey = params.get('attributeKey'),
-        attributeValue = params.get('attributeValue');
+      const attributeKey = params.get('attributeKey');
+      let attributeValue = params.get('attributeValue');
       if (attributeKey !== null || attributeValue !== null) {
         if (
           !query.modelId ||
           !attributeKey ||
           attributeValue === null ||
-          attributeValue.length > 120 ||
-          !models
-            .find((model) => model.id === query.modelId)
-            ?.fields.some((field) => field.key === attributeKey)
+          Array.from(attributeValue).length >
+            (effectiveFields(query.modelId, models).find(
+              (field) => field.key === attributeKey,
+            )?.maxLength ?? 120) ||
+          !effectiveFields(query.modelId, models).some(
+            (field) => field.key === attributeKey,
+          )
         )
           bad('属性查询需要有效模型、字段与等值条件');
+        if (
+          attributeValue &&
+          effectiveFields(query.modelId!, models).find(
+            (field) => field.key === attributeKey,
+          )?.type === 'timestamp'
+        )
+          attributeValue = timestampValue(attributeValue, 'attributeValue');
       }
+      const includeDescendants = params.has('includeDescendants')
+        ? choice(
+            params.get('includeDescendants'),
+            ['true', 'false'],
+            'includeDescendants',
+          ) === 'true'
+        : false;
+      if (includeDescendants && !query.modelId)
+        bad('包含子类需要先选择CI Class');
       const items = store.cis.filter(
         (ci) =>
-          (!query.modelId || ci.modelId === query.modelId) &&
+          (!query.modelId ||
+            (includeDescendants
+              ? isWithinClass(ci.modelId, query.modelId, models)
+              : ci.modelId === query.modelId)) &&
           (!query.environment || ci.environment === query.environment) &&
           (!query.status || ci.status === query.status) &&
           (!owner || ci.owner === owner) &&
@@ -735,7 +853,13 @@ export function createMockApi(options: { latency?: number } = {}) {
         );
       }
       const result = route(request);
-      if (request.method !== 'GET' && !request.path.endsWith('/preview'))
+      const requestPath = new URL(request.path, 'https://cmdb.example.invalid')
+        .pathname;
+      if (
+        request.method !== 'GET' &&
+        !requestPath.endsWith('/preview') &&
+        !requestPath.endsWith('/migration-preview')
+      )
         epoch++;
       return {
         status: result.status,

@@ -7,6 +7,37 @@ import type {
   Relation,
   RelationRule,
 } from './contracts';
+import { effectiveFields, isWithinClass } from './class-schema';
+
+export const timestampBounds = {
+  min: '1970-01-01T00:00:01.000Z',
+  max: '2038-01-19T03:14:07.499Z',
+};
+export function timestampValue(value: unknown, key: string): string {
+  const text = stringField(value, key, 20, 35);
+  const match =
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/.exec(
+      text,
+    );
+  if (
+    !match ||
+    !Number.isFinite(Date.parse(text)) ||
+    text.endsWith('-00:00') ||
+    new Date(`${match[1]}T00:00:00Z`).toISOString().slice(0, 10) !== match[1] ||
+    Number(match[2]) > 23 ||
+    Number(match[3]) > 59 ||
+    Number(match[4]) > 59
+  )
+    return bad('时间戳格式无效', {
+      [key]: '使用真实日期、显式 Z/时区偏移，秒必填，最多3位毫秒，不接受闰秒',
+    });
+  const normalized = new Date(text).toISOString();
+  if (normalized < timestampBounds.min || normalized > timestampBounds.max)
+    return bad('时间戳超出兼容范围', {
+      [key]: `${timestampBounds.min} 至 ${timestampBounds.max}`,
+    });
+  return normalized;
+}
 
 export class Problem extends Error {
   constructor(
@@ -61,6 +92,7 @@ export function attribute(
   field: ModelField,
   cis: CI[],
   previousValue?: AttributeValue,
+  models: CIModel[] = [],
 ): AttributeValue | undefined {
   const key = `attributes.${field.key}`;
   const value =
@@ -70,9 +102,18 @@ export function attribute(
     return undefined;
   }
   const type = field.type ?? 'text';
-  if (type === 'number') {
+  if (type === 'number' || type === 'integer') {
     if (typeof value !== 'number' || !Number.isFinite(value))
       return bad('数字属性无效', { [key]: '请输入有限数字' });
+    if (
+      type === 'integer' &&
+      (!Number.isInteger(value) ||
+        value < (field.minValue ?? -2147483648) ||
+        value > (field.maxValue ?? 2147483647))
+    )
+      return bad('整数超出范围或包含小数', {
+        [key]: `${field.minValue ?? -2147483648} 至 ${field.maxValue ?? 2147483647}`,
+      });
     return value;
   }
   if (type === 'boolean') {
@@ -80,7 +121,21 @@ export function attribute(
       return bad('布尔属性无效', { [key]: '请选择 true 或 false' });
     return value;
   }
-  const text = stringField(value, key, field.required ? 1 : 0, 120);
+  if (type === 'timestamp') return timestampValue(value, key);
+  const text =
+    type === 'varchar'
+      ? typeof value === 'string'
+        ? value.trim()
+        : bad('varchar 必须为字符串', { [key]: '请输入文本' })
+      : stringField(value, key, field.required ? 1 : 0, 120);
+  if (
+    type === 'varchar' &&
+    (Array.from(text).length > (field.maxLength ?? 255) ||
+      (field.required && !text))
+  )
+    bad('varchar 长度无效', {
+      [key]: `最多 ${field.maxLength ?? 255} 个Unicode字符${field.required ? '，不能为空' : ''}`,
+    });
   if (!text) return undefined;
   if (
     type === 'date' &&
@@ -96,7 +151,9 @@ export function attribute(
     !cis.some(
       (ci) =>
         ci.id === text &&
-        ci.modelId === field.referenceModelId &&
+        (models.length
+          ? isWithinClass(ci.modelId, field.referenceModelId!, models)
+          : ci.modelId === field.referenceModelId) &&
         (ci.status !== 'retired' || previousValue === text),
     )
   )
@@ -136,19 +193,20 @@ export function ciInput(
     models.map((model) => model.id),
     'modelId',
   );
-  const model = models.find((model) => model.id === modelId)!;
+  const fields = effectiveFields(modelId, models);
   const rawAttributes = object(input.attributes);
   onlyKeys(
     rawAttributes,
-    model.fields.map((field) => field.key),
+    fields.map((field) => field.key),
   );
   const attributes: Record<string, AttributeValue> = {};
-  for (const field of model.fields) {
+  for (const field of fields) {
     const value = attribute(
       rawAttributes[field.key],
       field,
       cis,
       previous?.attributes[field.key],
+      models,
     );
     if (value !== undefined) attributes[field.key] = value;
   }
@@ -176,8 +234,7 @@ export function uniqueAttributes(
   cis: CI[],
   excludeId?: string,
 ) {
-  for (const field of models.find((model) => model.id === input.modelId)!
-    .fields) {
+  for (const field of effectiveFields(input.modelId, models)) {
     const value = input.attributes[field.key];
     if (
       field.unique &&
@@ -185,7 +242,7 @@ export function uniqueAttributes(
       cis.some(
         (ci) =>
           ci.id !== excludeId &&
-          ci.modelId === input.modelId &&
+          isWithinClass(ci.modelId, field.originModelId!, models) &&
           ci.attributes[field.key] === value,
       )
     )
@@ -210,6 +267,9 @@ export function modelField(
     'defaultValue',
     'options',
     'referenceModelId',
+    'maxLength',
+    'minValue',
+    'maxValue',
   ]);
   const key = stringField(value.key, 'key', 1, 40);
   if (
@@ -220,7 +280,17 @@ export function modelField(
     bad('字段标识须以小写字母开头，仅使用字母、数字和下划线');
   const type = choice(
     value.type,
-    ['text', 'number', 'boolean', 'date', 'enum', 'reference'],
+    [
+      'text',
+      'number',
+      'boolean',
+      'date',
+      'enum',
+      'reference',
+      'varchar',
+      'integer',
+      'timestamp',
+    ],
     'type',
   );
   for (const flag of ['required', 'unique'])
@@ -237,6 +307,31 @@ export function modelField(
     required: value.required === true,
     unique: value.unique === true,
   };
+  if (type === 'varchar') {
+    const maxLength = value.maxLength ?? 255;
+    if (
+      !Number.isSafeInteger(maxLength) ||
+      Number(maxLength) < 1 ||
+      Number(maxLength) > 4096
+    )
+      bad('varchar 长度须为1–4096的整数');
+    field.maxLength = Number(maxLength);
+  } else if (value.maxLength !== undefined) bad('仅 varchar 可以配置长度');
+  if (type === 'integer') {
+    const min = value.minValue ?? -2147483648,
+      max = value.maxValue ?? 2147483647;
+    if (
+      !Number.isSafeInteger(min) ||
+      !Number.isSafeInteger(max) ||
+      Number(min) < -2147483648 ||
+      Number(max) > 2147483647 ||
+      Number(min) > Number(max)
+    )
+      bad('整数范围须在有符号32位内，最小值不能大于最大值');
+    field.minValue = Number(min);
+    field.maxValue = Number(max);
+  } else if (value.minValue !== undefined || value.maxValue !== undefined)
+    bad('仅 integer 可以配置整数范围');
   if (type === 'enum') {
     if (
       !Array.isArray(value.options) ||
@@ -263,6 +358,8 @@ export function modelField(
       value.defaultValue,
       { ...field, required: true },
       cis,
+      undefined,
+      models,
     );
   return field;
 }

@@ -1,4 +1,4 @@
-# CMDB API 契约草案 v0.2
+# CMDB API 契约草案 v0.3
 
 **产品原型 / 模拟数据**。这是后端适配目标，当前只由内存 Mock 实现，没有真实身份、权限、隔离、持久化或不可篡改审计。新增菜单/按钮/API 权限本阶段暂缓；正式服务需单独实施并验收。
 
@@ -47,20 +47,20 @@ Change：`{id,ciId,action,actor,summary,createdAt}`。action 为 created / updat
 
 ## 方法与路径
 
-| 方法 / 路径           | 请求                                                  | data 与结果                                                      |
-| --------------------- | ----------------------------------------------------- | ---------------------------------------------------------------- |
-| GET /models           | 无                                                    | CIModel[]：id、name、description、revision、fields，详见模型配置 |
-| GET /summary          | 无                                                    | `{total,active,relations,modelCounts:Record<modelId,number>}`    |
-| GET /cis              | 查询见下                                              | Page<CI>                                                         |
-| GET /cis/:id          | CI ID                                                 | CI；不存在 404                                                   |
-| POST /cis             | CIInput                                               | 新 CI，revision=1；重复键 409                                    |
-| PATCH /cis/:id        | `{name,owner,environment,status,attributes,revision}` | 完整更新可编辑字段，旧 revision 409，无写入                      |
-| GET /relations        | 可选 ciId                                             | Relation[]，源或目标匹配；未知 CI 404；本期无分页                |
-| POST /relations       | RelationInput                                         | 新 Relation；重复 409，非法端点 422/404                          |
-| DELETE /relations/:id | 无                                                    | `{id}`，保留 CI，增加双端点记录；不存在 404                      |
-| GET /changes          | 可选 ciId、page、pageSize                             | Page<Change>，新记录在前；未知 CI 404                            |
-| POST /imports/preview | ImportRequest                                         | ImportPreview，不修改资源，生成会话内预览令牌                    |
-| POST /imports         | ImportRequest                                         | 原子提交；`{ids,createdCount,updatedCount,unchangedCount}`       |
+| 方法 / 路径           | 请求                                                  | data 与结果                                                                     |
+| --------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------- |
+| GET /models           | 无                                                    | CIModel[]：id、name、description、revision、parentId?、有效fields，详见模型配置 |
+| GET /summary          | 无                                                    | `{total,active,relations,modelCounts:Record<modelId,number>}`                   |
+| GET /cis              | 查询见下                                              | Page<CI>                                                                        |
+| GET /cis/:id          | CI ID                                                 | CI；不存在 404                                                                  |
+| POST /cis             | CIInput                                               | 新 CI，revision=1；重复键 409                                                   |
+| PATCH /cis/:id        | `{name,owner,environment,status,attributes,revision}` | 完整更新可编辑字段，旧 revision 409，无写入                                     |
+| GET /relations        | 可选 ciId                                             | Relation[]，源或目标匹配；未知 CI 404；本期无分页                               |
+| POST /relations       | RelationInput                                         | 新 Relation；重复 409，非法端点 422/404                                         |
+| DELETE /relations/:id | 无                                                    | `{id}`，保留 CI，增加双端点记录；不存在 404                                     |
+| GET /changes          | 可选 ciId、page、pageSize                             | Page<Change>，新记录在前；未知 CI 404                                           |
+| POST /imports/preview | ImportRequest                                         | ImportPreview，不修改资源，生成会话内预览令牌                                   |
+| POST /imports         | ImportRequest                                         | 原子提交；`{ids,createdCount,updatedCount,unchangedCount}`                      |
 
 ### 列表行为
 
@@ -115,12 +115,21 @@ GET /cis 支持：
 
 ## 模型配置
 
-- `POST /models`：`{id,name,description}`，201 返回含空 fields、revision=1 的模型。id 为 2–40 位 `^[a-z][a-z0-9_]+$`，拒绝 constructor/prototype；name 2–40 字符，description 0–160 字符。id 全局唯一（重复 409 DUPLICATE_MODEL），本原型最多 20 个模型。
-- `POST /models/:id/fields/preview` 和 `POST /models/:id/fields`：`{revision,field}`。模型必须存在，revision 与当前正整数版本相等，否则 409 REVISION_CONFLICT。只支持追加，拒绝重复 key，每模型最多 25 字段。字段标识/类型不提供修改或删除 API。
-- field：`{key,label,description?,type,required?,unique?,defaultValue?,options?,referenceModelId?}`。key 为 1–40 位、小写字母开头的字母/数字/下划线，拒绝 constructor/prototype；label 1–40 字符，description 0–160。required/unique 只能为布尔值，默认 false。
+- `POST /models`：`{id,name,description,parentId?}`，201返回模型，revision=1、fields含继承的有效字段。parentId必须存在，单继承最多6层，建档后不提供修改或删除。id为2–40位`^[a-z][a-z0-9_]+$`，拒绝constructor/prototype；name 2–40字符，description 0–160字符。id全局唯一（409 DUPLICATE_MODEL），最多20个类。`GET /class-tree`返回`[{id,name,children:CIClassNode[]}]`；“全部CI Class”仅为前端导航容器。
+- `POST /models/:id/fields/preview`和`POST /models/:id/fields`：`{revision,field}`。模型必须存在，revision与当前版本相等，否则409 REVISION_CONFLICT。只支持追加；祖先/本类/任何子类的同名字段均拒绝，任意受影响类的有效字段不得超过25个。字段标识/类型不提供应用修改或删除API。
+- field：`{key,label,description?,type,required?,unique?,defaultValue?,options?,referenceModelId?,maxLength?,minValue?,maxValue?}`。key为1–40位、小写字母开头的字母/数字/下划线，拒绝Object原型保留名与prototype；label 1–40字符，description 0–160。required/unique为布尔值，默认false。响应有效字段带只读originModelId，表示声明来源；不接受客户端写入此元数据。
 - type：text（最多 120 字符）、number（JSON 有限数字）、boolean（JSON 布尔值）、date（真实日历日期 YYYY-MM-DD）、enum（1–20 个不重复、每项 1–40 字符的 options）、reference（指定现存 referenceModelId 下未退役 CI 的 ID）。已有引用的目标后来退役时允许原值保留，不允许新增指向退役资源的引用；导入也检查整批候选状态。其他类型不能携带 options/referenceModelId。种子字段未声明 type 时按 text 兼容，IPv4 保留额外格式校验。字段标识额外拒绝 Object 原型保留名。
-- 缺失、null 或空字符串属性使用 defaultValue（有默认值时）；没有默认值则可选属性省略、必填属性报错。false/0 是有效值。defaultValue 自身须通过类型/枚举/引用校验。unique 在同模型内比较规范化后的同类型值，包含退役 CI，忽略未填写。
-- 预览 200 返回 `{total,backfillCount,errors:[{externalKey,message}]}`，检查全部该模型资源，不改变模型或资源。提交再次检查 revision 和存量数据；不兼容则 422，无任何写入。成功 201 返回新模型，模型 revision+1；默认值回填的 CI revision+1、updatedAt 更新并记录 schema_backfilled；未回填 CI 不改版本。
+- 缺失、null或空字符串属性使用defaultValue；无默认值时可选属性省略、必填属性报错。false/0有效。默认值须通过类型校验。继承所有字段约束；unique在字段声明类及其完整子树比较规范化值，含退役CI，忽略未填写。reference允许指定类及其子类的资源；关系规则仍按具体类匹配，不自动继承。
+- 预览200返回`{total,backfillCount,errors:[{externalKey,message}],affectedClasses:[{id,name,revision,ciCount}]}`，覆盖本类与全部子类，不写数据。提交再次检查版本和存量，不兼容则422且不写入。成功201返回有效模型，受影响类的revision均+1；实际回填的CI revision+1、updatedAt更新并记录schema_backfilled；未改变属性值的CI不改版本。
+
+### 数据库风格类型与迁移预览（v0.3）
+
+- varchar：字符串，maxLength默认255，可配置整数1–4096；首尾空白按既有约定移除，再按Unicode码点计数。超长拒绝，不截断。其他类型不能携带maxLength。
+- integer：JSON数字、有符号32位整数，默认-2147483648至2147483647；可设minValue/maxValue但不能越过内建范围或前后颠倒。小数或JSON字符串拒绝；CSV按数字解析后复用校验。其他类型不能携带这两个范围字段。
+- timestamp：带Z或明确偏移的RFC3339子集，秒必填，最多3位毫秒，真实日历，拒绝无时区、-00:00和闰秒，归一化UTC。兼容范围1970-01-01T00:00:01.000Z至2038-01-19T03:14:07.499Z；默认值固定，不提供CURRENT_TIMESTAMP。唯一性和等值查询按规范化UTC比较。
+- long语义等待用户明确：不接受歧义`long`别名，也不默认把它映射成数字或长文本。完整类型说明、数据库原始范围和原型边界见[CI Class与字段类型](ci-classes.md)。
+- `GET /cis`新增includeDescendants=true/false，默认false；true必须带modelId，筛选完整子树。保存视图也支持同名字符串条件。属性查询支持所选类继承字段；varchar按字段长度校验查询值，timestamp条件会规范化。
+- `POST /models/:id/fields/:key/migration-preview`：`{revision,field}`，key固定且仅可评估本类声明字段。200返回上述SchemaPreview并增加changes数组`{externalKey,modelId,before,after}`。逐行评估候选类型/长度/范围及继承唯一性；integer仅额外尝试解析严格十进制整数字符串，不截断或猜测时区。列出差异及阻塞，不能应用改型。此接口不写模型/CI/关系/变更记录、不使导入令牌失效；不可逆调整需后续明确确认。
 
 ## 映射导入与更新
 

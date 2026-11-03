@@ -1,7 +1,10 @@
 [
   {
     "name": "Seeded summary",
-    "request": { "method": "GET", "path": "/api/v1/summary" },
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/summary"
+    },
     "response": {
       "status": 200,
       "body": {
@@ -9,7 +12,11 @@
           "total": 6,
           "active": 4,
           "relations": 2,
-          "modelCounts": { "host": 3, "service": 2, "database": 1 }
+          "modelCounts": {
+            "host": 3,
+            "service": 2,
+            "database": 1
+          }
         },
         "requestId": "mock-1"
       }
@@ -17,11 +24,17 @@
   },
   {
     "name": "Missing configuration item",
-    "request": { "method": "GET", "path": "/api/v1/cis/missing" },
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/cis/missing"
+    },
     "response": {
       "status": 404,
       "body": {
-        "error": { "code": "NOT_FOUND", "message": "配置项不存在" },
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "配置项不存在"
+        },
         "requestId": "mock-1"
       }
     }
@@ -47,7 +60,9 @@
         "error": {
           "code": "DUPLICATE_KEY",
           "message": "资源标识已经存在",
-          "fields": { "externalKey": "请使用不同的资源标识" }
+          "fields": {
+            "externalKey": "请使用不同的资源标识"
+          }
         },
         "requestId": "mock-1"
       }
@@ -98,7 +113,19 @@
     "response": {
       "status": 200,
       "body": {
-        "data": { "total": 3, "backfillCount": 3, "errors": [] },
+        "data": {
+          "total": 3,
+          "backfillCount": 3,
+          "errors": [],
+          "affectedClasses": [
+            {
+              "id": "host",
+              "name": "主机",
+              "revision": 1,
+              "ciCount": 3
+            }
+          ]
+        },
         "requestId": "mock-1"
       }
     }

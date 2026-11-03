@@ -7,7 +7,20 @@ export interface ModelField {
   label: string;
   description: string;
   format?: 'ipv4';
-  type?: 'text' | 'number' | 'boolean' | 'date' | 'enum' | 'reference';
+  type?:
+    | 'text'
+    | 'number'
+    | 'boolean'
+    | 'date'
+    | 'enum'
+    | 'reference'
+    | 'varchar'
+    | 'integer'
+    | 'timestamp';
+  maxLength?: number;
+  minValue?: number;
+  maxValue?: number;
+  originModelId?: ModelId;
   required?: boolean;
   unique?: boolean;
   defaultValue?: string | number | boolean;
@@ -20,6 +33,12 @@ export interface CIModel {
   description: string;
   fields: ModelField[];
   revision?: number;
+  parentId?: ModelId;
+}
+export interface CIClassNode {
+  id: ModelId;
+  name: string;
+  children: CIClassNode[];
 }
 export type AttributeValue = string | number | boolean;
 export interface FieldChange {
@@ -30,6 +49,18 @@ export interface SchemaPreview {
   total: number;
   backfillCount: number;
   errors: { externalKey: string; message: string }[];
+  affectedClasses?: {
+    id: ModelId;
+    name: string;
+    revision: number;
+    ciCount: number;
+  }[];
+  changes?: {
+    externalKey: string;
+    modelId: ModelId;
+    before: AttributeValue | null;
+    after: AttributeValue | null;
+  }[];
 }
 export interface CIInput {
   externalKey: string;
@@ -100,6 +131,7 @@ export interface CIQuery {
   owner?: string;
   attributeKey?: string;
   attributeValue?: string;
+  includeDescendants?: 'true' | 'false';
 }
 export interface SavedView {
   id: string;

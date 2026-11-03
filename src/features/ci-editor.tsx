@@ -1,4 +1,13 @@
-import { Alert, App, Form, Input, Modal, Select, Typography } from 'antd';
+import {
+  Alert,
+  App,
+  Form,
+  Input,
+  Modal,
+  Select,
+  TreeSelect,
+  Typography,
+} from 'antd';
 import { useState } from 'react';
 import { ApiError, errorText } from '../shared/api/client';
 import type { CI, CIInput, CIModel } from '../shared/api/contracts';
@@ -6,6 +15,7 @@ import { environmentLabels, lifecycleLabels } from '../shared/api/contracts';
 import { useRuntime } from '../shared/api/runtime';
 import { useResource } from '../shared/useResource';
 import { fieldControl } from '../shared/field-input';
+import { classOptions } from '../shared/api/class-schema';
 
 export function CIEditor({
   ci,
@@ -129,12 +139,12 @@ export function CIEditor({
             label="资源模型"
             rules={[{ required: true }]}
           >
-            <Select
+            <TreeSelect
               disabled={!!ci}
-              options={models.map((model) => ({
-                value: model.id,
-                label: model.name,
-              }))}
+              treeData={classOptions(models)}
+              treeDefaultExpandAll
+              showSearch
+              treeNodeFilterProp="title"
             />
           </Form.Item>
           <Form.Item
@@ -232,7 +242,12 @@ export function CIEditor({
                 : []),
             ]}
           >
-            {fieldControl(field, references.data, ci?.attributes[field.key])}
+            {fieldControl(
+              field,
+              references.data,
+              ci?.attributes[field.key],
+              models,
+            )}
           </Form.Item>
         ))}
         {references.error ? (

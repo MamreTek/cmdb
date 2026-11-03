@@ -111,6 +111,7 @@ describe('configurable inventory contracts', () => {
       total: 3,
       backfillCount: 3,
       errors: [],
+      affectedClasses: [{ id: 'host', name: '主机', revision: 1, ciCount: 3 }],
     });
     await api.addField('host', request);
     const ci = await api.get('ci-demo-host-01');

@@ -7,6 +7,7 @@ import type {
   ImportRow,
 } from './contracts';
 import { parseCsv } from './csv';
+import { effectiveFields } from './class-schema';
 import {
   Problem,
   bad,
@@ -80,7 +81,9 @@ export function previewImport(
   const targets = [
     ...baseColumns,
     ...models.flatMap((model) =>
-      model.fields.map((field) => `attributes.${field.key}`),
+      effectiveFields(model.id, models).map(
+        (field) => `attributes.${field.key}`,
+      ),
     ),
   ];
   onlyKeys(mapping, targets);
@@ -122,11 +125,13 @@ export function previewImport(
         key.startsWith('attributes.'),
       )) {
         const fieldKey = key.slice(11),
-          field = model!.fields.find((field) => field.key === fieldKey);
+          field = effectiveFields(model!.id, models).find(
+            (field) => field.key === fieldKey,
+          );
         if (!field) bad(`该模型没有属性 ${fieldKey}`);
         const type = field!.type;
         if (!text) delete attributes[fieldKey];
-        else if (type === 'number') {
+        else if (type === 'number' || type === 'integer') {
           if (!/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(text))
             bad(`${field!.label}必须为数字`);
           attributes[fieldKey] = Number(text);
