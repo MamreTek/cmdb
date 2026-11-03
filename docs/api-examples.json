@@ -1,0 +1,133 @@
+[
+  {
+    "name": "Seeded summary",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/summary"
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "data": {
+          "total": 6,
+          "active": 4,
+          "relations": 2,
+          "modelCounts": {
+            "host": 3,
+            "service": 2,
+            "database": 1
+          }
+        },
+        "requestId": "mock-1"
+      }
+    }
+  },
+  {
+    "name": "Missing configuration item",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/cis/missing"
+    },
+    "response": {
+      "status": 404,
+      "body": {
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "配置项不存在"
+        },
+        "requestId": "mock-1"
+      }
+    }
+  },
+  {
+    "name": "Duplicate external identifier",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/cis",
+      "body": {
+        "externalKey": "demo.web-01",
+        "name": "示例重复资源",
+        "modelId": "host",
+        "owner": "示例团队",
+        "environment": "staging",
+        "status": "active",
+        "attributes": {}
+      }
+    },
+    "response": {
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "DUPLICATE_KEY",
+          "message": "资源标识已经存在",
+          "fields": {
+            "externalKey": "请使用不同的资源标识"
+          }
+        },
+        "requestId": "mock-1"
+      }
+    }
+  },
+  {
+    "name": "Create an empty custom model",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/models",
+      "body": {
+        "id": "middleware",
+        "name": "中间件",
+        "description": "示例模型"
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "data": {
+          "id": "middleware",
+          "name": "中间件",
+          "description": "示例模型",
+          "fields": [],
+          "revision": 1
+        },
+        "requestId": "mock-1"
+      }
+    }
+  },
+  {
+    "name": "Preview a typed required field with default backfill",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/models/host/fields/preview",
+      "body": {
+        "revision": 1,
+        "field": {
+          "key": "costCenter",
+          "label": "成本中心",
+          "description": "",
+          "type": "text",
+          "required": true,
+          "defaultValue": "demo-center"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "data": {
+          "total": 3,
+          "backfillCount": 3,
+          "errors": [],
+          "affectedClasses": [
+            {
+              "id": "host",
+              "name": "主机",
+              "revision": 1,
+              "ciCount": 3
+            }
+          ]
+        },
+        "requestId": "mock-1"
+      }
+    }
+  }
+]
