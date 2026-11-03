@@ -52,5 +52,55 @@
         "requestId": "mock-1"
       }
     }
+  },
+  {
+    "name": "Create an empty custom model",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/models",
+      "body": {
+        "id": "middleware",
+        "name": "中间件",
+        "description": "示例模型"
+      }
+    },
+    "response": {
+      "status": 201,
+      "body": {
+        "data": {
+          "id": "middleware",
+          "name": "中间件",
+          "description": "示例模型",
+          "fields": [],
+          "revision": 1
+        },
+        "requestId": "mock-1"
+      }
+    }
+  },
+  {
+    "name": "Preview a typed required field with default backfill",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/models/host/fields/preview",
+      "body": {
+        "revision": 1,
+        "field": {
+          "key": "costCenter",
+          "label": "成本中心",
+          "description": "",
+          "type": "text",
+          "required": true,
+          "defaultValue": "demo-center"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "data": { "total": 3, "backfillCount": 3, "errors": [] },
+        "requestId": "mock-1"
+      }
+    }
   }
 ]

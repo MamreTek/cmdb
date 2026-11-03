@@ -11,6 +11,7 @@ const actionLabels: Record<string, string> = {
   relation_added: '建立关系',
   relation_removed: '移除关系',
   imported: '导入',
+  schema_backfilled: '模型默认值回填',
 };
 export function ChangesPage() {
   const { api } = useRuntime();
@@ -24,9 +25,8 @@ export function ChangesPage() {
   return (
     <>
       <PageTitle
-        eyebrow="CHANGE HISTORY"
-        title="变更，有迹可循"
-        description="核对建档、属性更新与关系维护的过程。这些是模拟操作记录，不具备真实审计保证。"
+        title="变更记录"
+        description="查看配置项和关系的模拟变更记录，不具备真实审计保证。"
       />
       <Card className="table-card">
         <div className="filter-bar">

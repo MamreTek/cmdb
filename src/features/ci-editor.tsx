@@ -4,6 +4,8 @@ import { ApiError, errorText } from '../shared/api/client';
 import type { CI, CIInput, CIModel } from '../shared/api/contracts';
 import { environmentLabels, lifecycleLabels } from '../shared/api/contracts';
 import { useRuntime } from '../shared/api/runtime';
+import { useResource } from '../shared/useResource';
+import { fieldControl } from '../shared/field-input';
 
 export function CIEditor({
   ci,
@@ -17,6 +19,7 @@ export function CIEditor({
   onSaved: (ci: CI) => void;
 }) {
   const { api } = useRuntime();
+  const references = useResource(() => api.allCIs(), 'field-references');
   const { modal } = App.useApp();
   const [form] = Form.useForm<CIInput>();
   const [busy, setBusy] = useState(false);
@@ -210,8 +213,9 @@ export function CIEditor({
             name={['attributes', field.key]}
             label={field.label}
             extra={field.description}
+            initialValue={ci ? undefined : field.defaultValue}
             rules={[
-              { max: 120, message: '最多 120 字符' },
+              { required: field.required, message: `请填写${field.label}` },
               ...(field.format === 'ipv4'
                 ? [
                     {
@@ -228,9 +232,16 @@ export function CIEditor({
                 : []),
             ]}
           >
-            <Input maxLength={120} />
+            {fieldControl(field, references.data, ci?.attributes[field.key])}
           </Form.Item>
         ))}
+        {references.error ? (
+          <Alert
+            type="error"
+            title={errorText(references.error)}
+            action={<a onClick={references.reload}>重试引用资源</a>}
+          />
+        ) : null}
       </Form>
     </Modal>
   );

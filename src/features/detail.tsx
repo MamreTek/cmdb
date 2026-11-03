@@ -17,6 +17,7 @@ import { useResource } from '../shared/useResource';
 import { EmptyState, FailureNotice, StatusTag, time } from '../shared/ui';
 import { CIEditor } from './ci-editor';
 import { RelationEditor, RelationTable } from './relations';
+import { attributeText } from '../shared/field-input';
 
 export function CIDetail({
   id,
@@ -175,13 +176,27 @@ export function CIDetail({
                             label: '更新时间',
                             children: time(ci.updatedAt),
                           },
+                          {
+                            key: 'source',
+                            label: '最近 CSV 写入 / 初始来源',
+                            children: ci.source
+                              ? `${ci.source.label} · ${time(ci.source.at)}`
+                              : '手工建档 / 演示初始化',
+                          },
                           ...(
                             models?.find((model) => model.id === ci.modelId)
                               ?.fields ?? []
                           ).map((field) => ({
                             key: field.key,
                             label: field.label,
-                            children: ci.attributes[field.key] || '未填写',
+                            children:
+                              field.type === 'reference'
+                                ? (cis?.find(
+                                    (item) =>
+                                      item.id === ci.attributes[field.key],
+                                  )?.name ??
+                                  attributeText(ci.attributes[field.key]))
+                                : attributeText(ci.attributes[field.key]),
                           })),
                         ]}
                       />

@@ -1,29 +1,40 @@
-import { Alert, Button, Empty, Space, Tag, Typography } from 'antd';
+import {
+  Alert,
+  Badge,
+  Breadcrumb,
+  Button,
+  Empty,
+  Space,
+  Typography,
+} from 'antd';
 import type { ReactNode } from 'react';
+import { Link } from 'react-router';
 import { errorText } from './api/client';
 import { lifecycleLabels, type Lifecycle } from './api/contracts';
 
 export function PageTitle({
-  eyebrow,
   title,
   description,
   extra,
 }: {
-  eyebrow: string;
   title: string;
   description: string;
   extra?: ReactNode;
 }) {
   return (
-    <div className="page-title">
-      <div>
-        <span className="eyebrow">{eyebrow}</span>
-        <Typography.Title level={2}>{title}</Typography.Title>
-        <Typography.Paragraph type="secondary">
-          {description}
-        </Typography.Paragraph>
+    <div className="page-header">
+      <Breadcrumb
+        items={[{ title: <Link to="/">配置管理</Link> }, { title }]}
+      />
+      <div className="page-title">
+        <div>
+          <Typography.Title level={2}>{title}</Typography.Title>
+          <Typography.Paragraph type="secondary">
+            {description}
+          </Typography.Paragraph>
+        </div>
+        {extra && <Space wrap>{extra}</Space>}
       </div>
-      <Space wrap>{extra}</Space>
     </div>
   );
 }
@@ -52,17 +63,16 @@ export function FailureNotice({
 }
 export function StatusTag({ status }: { status: Lifecycle }) {
   return (
-    <Tag
-      color={
+    <Badge
+      status={
         status === 'active'
           ? 'success'
           : status === 'maintenance'
             ? 'warning'
             : 'default'
       }
-    >
-      {lifecycleLabels[status]}
-    </Tag>
+      text={lifecycleLabels[status]}
+    />
   );
 }
 export function EmptyState({ text = '还没有匹配的配置项' }: { text?: string }) {

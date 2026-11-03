@@ -2,243 +2,32 @@ import type {
   ApiRequest,
   CI,
   CIInput,
+  CIModel,
   CIQuery,
   Change,
-  ImportPreview,
-  ImportRow,
+  SchemaPreview,
+  RelationRule,
+  SavedView,
   Page,
   Relation,
   RelationInput,
   Transport,
 } from './contracts';
-import { models, seedData } from './seed';
+import { models as seedModels, seedData } from './seed';
 
-class Problem extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-    public fields?: Record<string, string>,
-  ) {
-    super(message);
-  }
-}
-const bad = (message: string, fields?: Record<string, string>): never => {
-  throw new Problem(422, 'VALIDATION_ERROR', message, fields);
-};
-function object(input: unknown): Record<string, unknown> {
-  if (!input || typeof input !== 'object' || Array.isArray(input))
-    return bad('请求必须是 JSON 对象');
-  return input as Record<string, unknown>;
-}
-function onlyKeys(value: Record<string, unknown>, keys: string[]) {
-  const invalid = Object.keys(value).filter((key) => !keys.includes(key));
-  if (invalid.length) bad(`不支持的字段：${invalid.join(', ')}`);
-}
-function stringField(
-  value: unknown,
-  key: string,
-  min: number,
-  max: number,
-): string {
-  if (
-    typeof value !== 'string' ||
-    value.trim().length < min ||
-    value.trim().length > max
-  ) {
-    return bad('请检查字段内容', { [key]: `请输入 ${min}–${max} 个字符` });
-  }
-  return value.trim();
-}
-function choice<T extends string>(
-  value: unknown,
-  values: readonly T[],
-  key: string,
-): T {
-  if (typeof value !== 'string' || !values.includes(value as T))
-    return bad('字段值不在允许范围内', { [key]: `可选：${values.join(', ')}` });
-  return value as T;
-}
-function ciInput(raw: unknown): CIInput {
-  const input = object(raw);
-  onlyKeys(input, [
-    'externalKey',
-    'name',
-    'modelId',
-    'owner',
-    'environment',
-    'status',
-    'attributes',
-  ]);
-  const externalKey = stringField(input.externalKey, 'externalKey', 3, 64);
-  if (!/^[a-z][a-z0-9._-]{2,63}$/.test(externalKey))
-    bad('资源标识格式不正确', {
-      externalKey:
-        '小写字母开头，使用字母、数字、点、下划线或短横线，3–64 字符',
-    });
-  const modelId = choice(
-    input.modelId,
-    ['host', 'service', 'database'],
-    'modelId',
-  );
-  const model = models.find((item) => item.id === modelId)!;
-  const sourceAttributes = object(input.attributes);
-  onlyKeys(
-    sourceAttributes,
-    model.fields.map((field) => field.key),
-  );
-  const attributes: Record<string, string> = {};
-  for (const field of model.fields) {
-    const value = sourceAttributes[field.key];
-    if (value === undefined) continue;
-    const content = stringField(value, `attributes.${field.key}`, 0, 120);
-    if (
-      content &&
-      field.format === 'ipv4' &&
-      !/^(0|[1-9]\d{0,2})(\.(0|[1-9]\d{0,2})){3}$/.test(content)
-    )
-      bad('IPv4 地址格式不正确', {
-        [`attributes.${field.key}`]: '请输入标准 IPv4 地址',
-      });
-    if (
-      content &&
-      field.format === 'ipv4' &&
-      content.split('.').some((part) => Number(part) > 255)
-    )
-      bad('IPv4 地址超出范围', { [`attributes.${field.key}`]: '每段为 0–255' });
-    if (content) attributes[field.key] = content;
-  }
-  return {
-    externalKey,
-    modelId,
-    name: stringField(input.name, 'name', 2, 80),
-    owner: stringField(input.owner, 'owner', 2, 60),
-    environment: choice(
-      input.environment,
-      ['production', 'staging', 'development'],
-      'environment',
-    ),
-    status: choice(
-      input.status,
-      ['active', 'maintenance', 'retired'],
-      'status',
-    ),
-    attributes,
-  };
-}
-
-interface CSVRecord {
-  line: number;
-  cells: string[];
-}
-function parseCsv(csv: string): CSVRecord[] {
-  const rows: CSVRecord[] = [];
-  let cells: string[] = [],
-    cell = '',
-    quoted = false,
-    closed = false,
-    line = 1,
-    start = 1;
-  const commit = () => {
-    rows.push({ line: start, cells: [...cells, cell] });
-    cells = [];
-    cell = '';
-    closed = false;
-    start = line + 1;
-  };
-  for (let index = 0; index < csv.length; index++) {
-    const char = csv[index]!;
-    if (quoted) {
-      if (char === '"') {
-        if (csv[index + 1] === '"') {
-          cell += '"';
-          index++;
-        } else {
-          quoted = false;
-          closed = true;
-        }
-      } else {
-        cell += char;
-        if (char === '\n') line++;
-      }
-      continue;
-    }
-    if (char === '"') {
-      if (cell || closed)
-        return bad(`第 ${line} 行：引号位置不正确`, {
-          csv: '双引号必须从单元格开头开始',
-        });
-      quoted = true;
-    } else if (char === ',') {
-      cells.push(cell);
-      cell = '';
-      closed = false;
-    } else if (char === '\n' || char === '\r') {
-      if (char === '\r' && csv[index + 1] === '\n') index++;
-      commit();
-      line++;
-      start = line;
-    } else {
-      if (closed)
-        return bad(`第 ${line} 行：引号后存在额外字符`, {
-          csv: '闭合引号后只能跟逗号或换行',
-        });
-      cell += char;
-    }
-  }
-  if (quoted) return bad('CSV 引号未闭合', { csv: '请检查引号配对' });
-  if (cell || cells.length || closed)
-    rows.push({ line: start, cells: [...cells, cell] });
-  return rows.filter((row) => row.cells.some((value) => value.trim() !== ''));
-}
-
-function importPreview(raw: unknown, cis: CI[]): ImportPreview {
-  const input = object(raw);
-  onlyKeys(input, ['csv']);
-  const csv = stringField(input.csv, 'csv', 1, 100_000).replace(/^\uFEFF/, '');
-  const records = parseCsv(csv);
-  const header = records.shift();
-  const keys = [
-    'externalKey',
-    'name',
-    'modelId',
-    'owner',
-    'environment',
-    'status',
-  ];
-  if (!header || header.cells.join(',') !== keys.join(','))
-    return bad('CSV 表头必须与示例完全一致', { csv: keys.join(',') });
-  if (!records.length || records.length > 200)
-    return bad('每批导入 1–200 行', { csv: '请拆分批次或添加数据行' });
-  const seen = new Set(cis.map((ci) => ci.externalKey));
-  const rows: ImportRow[] = records.map((record) => {
-    let input: CIInput | null = null;
-    const errors: string[] = [];
-    try {
-      if (record.cells.length !== keys.length) bad('列数必须为 6');
-      input = ciInput({
-        ...Object.fromEntries(
-          keys.map((key, index) => [key, record.cells[index]]),
-        ),
-        attributes: {},
-      });
-      if (seen.has(input.externalKey))
-        errors.push('资源标识已存在或在本批次重复');
-      seen.add(input.externalKey);
-    } catch (error) {
-      if (!(error instanceof Problem)) throw error;
-      errors.push(
-        error.message,
-        ...Object.entries(error.fields ?? {}).map(
-          ([field, message]) => `${field}: ${message}`,
-        ),
-      );
-    }
-    return { line: record.line, input, errors };
-  });
-  const invalidCount = rows.filter((row) => row.errors.length > 0).length;
-  return { rows, validCount: rows.length - invalidCount, invalidCount };
-}
+import {
+  Problem,
+  bad,
+  object,
+  onlyKeys,
+  stringField,
+  choice,
+  ciInput,
+  uniqueAttributes,
+  modelField,
+  relationRuleValid,
+} from './validation';
+import { previewImport, importRequest, importSignature } from './imports';
 
 function pageParams(params: URLSearchParams): {
   page: number;
@@ -289,7 +78,49 @@ export function createMockApi(options: { latency?: number } = {}) {
   let store = seedData(),
     fail = false,
     sequence = 0;
-  const id = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+  let models = structuredClone(seedModels).map((model) => ({
+    ...model,
+    revision: 1,
+  })) as CIModel[];
+  const seedRules = (): RelationRule[] =>
+    [
+      ...seedModels.flatMap((source) =>
+        seedModels.map((target) => ({
+          sourceModelId: source.id,
+          targetModelId: target.id,
+          type: 'depends_on' as const,
+        })),
+      ),
+      {
+        sourceModelId: 'service',
+        targetModelId: 'host',
+        type: 'runs_on' as const,
+      },
+      {
+        sourceModelId: 'database',
+        targetModelId: 'host',
+        type: 'runs_on' as const,
+      },
+    ].map((rule, index) => ({
+      ...rule,
+      id: `rule-${index}`,
+      cardinality: 'n:n',
+      revision: 1,
+    }));
+  let rules = seedRules(),
+    views: SavedView[] = [],
+    epoch = 0;
+  const previews = new Map<string, { epoch: number; signature: string }>();
+  const id = (prefix: string) => {
+    // getRandomValues is also available on private HTTP origins used for LAN demos.
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('');
+    return `${prefix}-${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  };
   const findCI = (key: string) => {
     const ci = store.cis.find((item) => item.id === key);
     if (!ci) throw new Problem(404, 'NOT_FOUND', '配置项不存在');
@@ -310,6 +141,7 @@ export function createMockApi(options: { latency?: number } = {}) {
       throw new Problem(409, 'DUPLICATE_KEY', '资源标识已经存在', {
         externalKey: '请使用不同的资源标识',
       });
+    uniqueAttributes(input, models, store.cis);
   };
   const create = (
     input: CIInput,
@@ -317,7 +149,7 @@ export function createMockApi(options: { latency?: number } = {}) {
   ) => {
     unique(input);
     const now = new Date().toISOString();
-    const ci = {
+    const ci: CI = {
       ...input,
       id: id('ci'),
       revision: 1,
@@ -337,6 +169,236 @@ export function createMockApi(options: { latency?: number } = {}) {
       params = url.searchParams;
     if (method === 'GET' && pathname === '/api/v1/models')
       return { status: 200, data: models };
+    if (method === 'POST' && pathname === '/api/v1/models') {
+      const value = object(body);
+      onlyKeys(value, ['id', 'name', 'description']);
+      const modelId = stringField(value.id, 'id', 2, 40);
+      if (
+        !/^[a-z][a-z0-9_]+$/.test(modelId) ||
+        ['constructor', 'prototype'].includes(modelId)
+      )
+        bad('模型标识仅允许小写字母、数字和下划线，以字母开头');
+      if (models.some((model) => model.id === modelId))
+        throw new Problem(409, 'DUPLICATE_MODEL', '模型标识已存在');
+      if (models.length >= 20) bad('原型最多 20 个模型');
+      const model: CIModel = {
+        id: modelId,
+        name: stringField(value.name, 'name', 2, 40),
+        description: stringField(
+          value.description ?? '',
+          'description',
+          0,
+          160,
+        ),
+        fields: [],
+        revision: 1,
+      };
+      models.push(model);
+      return { status: 201, data: model };
+    }
+    const fieldMatch = /^\/api\/v1\/models\/([^/]+)\/fields(\/preview)?$/.exec(
+      pathname,
+    );
+    if (method === 'POST' && fieldMatch) {
+      const model = models.find(
+        (model) => model.id === decodeURIComponent(fieldMatch[1]!),
+      );
+      if (!model) throw new Problem(404, 'NOT_FOUND', '模型不存在');
+      const value = object(body);
+      onlyKeys(value, ['revision', 'field']);
+      if (value.revision !== model.revision)
+        throw new Problem(409, 'REVISION_CONFLICT', '模型已更新，请刷新后重试');
+      const field = modelField(value.field, models, store.cis);
+      if (model.fields.some((item) => item.key === field.key))
+        bad('字段标识已存在');
+      if (model.fields.length >= 25) bad('原型每个模型最多 25 个字段');
+      const changed = {
+        ...model,
+        fields: [...model.fields, field],
+        revision: model.revision! + 1,
+      };
+      const schemas = models.map((item) =>
+        item.id === model.id ? changed : item,
+      );
+      const preview: SchemaPreview = { total: 0, backfillCount: 0, errors: [] };
+      const replacements: CI[] = [];
+      for (const ci of store.cis.filter((ci) => ci.modelId === model.id)) {
+        preview.total++;
+        try {
+          const {
+            externalKey,
+            name,
+            modelId,
+            owner,
+            environment,
+            status,
+            attributes,
+          } = ci;
+          const normalized = ciInput(
+            {
+              externalKey,
+              name,
+              modelId,
+              owner,
+              environment,
+              status,
+              attributes,
+            },
+            schemas,
+            store.cis,
+            ci,
+          );
+          uniqueAttributes(normalized, schemas, replacements, ci.id);
+          const backfilled =
+            JSON.stringify(normalized.attributes) !==
+            JSON.stringify(ci.attributes);
+          if (backfilled) preview.backfillCount++;
+          replacements.push({
+            ...ci,
+            ...normalized,
+            revision: ci.revision + (backfilled ? 1 : 0),
+            updatedAt: backfilled ? new Date().toISOString() : ci.updatedAt,
+          });
+        } catch (error) {
+          if (!(error instanceof Problem)) throw error;
+          preview.errors.push({
+            externalKey: ci.externalKey,
+            message: [error.message, ...Object.values(error.fields ?? {})].join(
+              '；',
+            ),
+          });
+        }
+      }
+      if (fieldMatch[2]) return { status: 200, data: preview };
+      if (preview.errors.length)
+        bad('模型变更与存量数据不兼容，请先修复或调整默认值');
+      models[models.indexOf(model)] = changed;
+      for (const ci of replacements) {
+        const previous = findCI(ci.id);
+        store.cis[store.cis.indexOf(previous)] = ci;
+        if (ci.revision !== previous.revision)
+          log(
+            ci.id,
+            'schema_backfilled',
+            `模型字段 ${field.label} 默认值回填 · 版本 ${ci.revision}`,
+          );
+      }
+      return { status: 201, data: changed };
+    }
+    if (pathname === '/api/v1/relation-rules' && method === 'GET')
+      return { status: 200, data: rules };
+    const ruleMatch = /^\/api\/v1\/relation-rules\/([^/]+)$/.exec(pathname);
+    if (
+      (pathname === '/api/v1/relation-rules' && method === 'POST') ||
+      (ruleMatch && method === 'PATCH')
+    ) {
+      const value = object(body);
+      let rule: RelationRule;
+      if (ruleMatch) {
+        onlyKeys(value, ['revision', 'cardinality']);
+        const existing = rules.find(
+          (rule) => rule.id === decodeURIComponent(ruleMatch[1]!),
+        );
+        if (!existing) throw new Problem(404, 'NOT_FOUND', '关系规则不存在');
+        if (value.revision !== existing.revision)
+          throw new Problem(409, 'REVISION_CONFLICT', '关系规则已更新，请刷新');
+        rule = {
+          ...existing,
+          cardinality: choice(
+            value.cardinality,
+            ['1:1', '1:n', 'n:n'],
+            'cardinality',
+          ),
+          revision: existing.revision + 1,
+        };
+      } else {
+        onlyKeys(value, [
+          'sourceModelId',
+          'targetModelId',
+          'type',
+          'cardinality',
+        ]);
+        rule = {
+          id: id('rule'),
+          sourceModelId: choice(
+            value.sourceModelId,
+            models.map((model) => model.id),
+            'sourceModelId',
+          ),
+          targetModelId: choice(
+            value.targetModelId,
+            models.map((model) => model.id),
+            'targetModelId',
+          ),
+          type: choice(value.type, ['depends_on', 'runs_on'], 'type'),
+          cardinality: choice(
+            value.cardinality,
+            ['1:1', '1:n', 'n:n'],
+            'cardinality',
+          ),
+          revision: 1,
+        };
+        if (
+          rules.some(
+            (item) =>
+              item.sourceModelId === rule.sourceModelId &&
+              item.targetModelId === rule.targetModelId &&
+              item.type === rule.type,
+          )
+        )
+          throw new Problem(
+            409,
+            'DUPLICATE_RULE',
+            '模型关系规则已存在，请编辑基数',
+          );
+        if (rules.length >= 100) bad('原型最多 100 条模型关系规则');
+      }
+      relationRuleValid(rule, store.relations, store.cis);
+      if (ruleMatch)
+        rules[rules.findIndex((item) => item.id === rule.id)] = rule;
+      else rules.push(rule);
+      return { status: ruleMatch ? 200 : 201, data: rule };
+    }
+    if (pathname === '/api/v1/views' && method === 'GET')
+      return { status: 200, data: views };
+    if (pathname === '/api/v1/views' && method === 'POST') {
+      const value = object(body);
+      onlyKeys(value, ['name', 'query']);
+      const name = stringField(value.name, 'name', 1, 40),
+        query = object(value.query);
+      onlyKeys(query, [
+        'q',
+        'modelId',
+        'environment',
+        'status',
+        'owner',
+        'attributeKey',
+        'attributeValue',
+        'sortBy',
+        'sortOrder',
+      ]);
+      if (Object.values(query).some((value) => typeof value !== 'string'))
+        bad('视图查询值须为字符串');
+      route({
+        method: 'GET',
+        path: `/api/v1/cis?${new URLSearchParams(query as Record<string, string>)}`,
+      });
+      if (views.some((view) => view.name === name))
+        throw new Problem(409, 'DUPLICATE_VIEW', '视图名称已存在');
+      if (views.length >= 20) bad('原型最多 20 个保存视图');
+      const view: SavedView = { id: id('view'), name, query: query as CIQuery };
+      views.push(view);
+      return { status: 201, data: view };
+    }
+    const viewMatch = /^\/api\/v1\/views\/([^/]+)$/.exec(pathname);
+    if (method === 'DELETE' && viewMatch) {
+      const view = views.find(
+        (view) => view.id === decodeURIComponent(viewMatch[1]!),
+      );
+      if (!view) throw new Problem(404, 'NOT_FOUND', '视图不存在');
+      views = views.filter((item) => item.id !== view.id);
+      return { status: 200, data: { id: view.id } };
+    }
     if (method === 'GET' && pathname === '/api/v1/summary')
       return {
         status: 200,
@@ -362,12 +424,15 @@ export function createMockApi(options: { latency?: number } = {}) {
         'sortOrder',
         'page',
         'pageSize',
+        'owner',
+        'attributeKey',
+        'attributeValue',
       ]);
       const query: CIQuery = {};
       if (params.has('modelId'))
         query.modelId = choice(
           params.get('modelId'),
-          ['host', 'service', 'database'] as const,
+          models.map((model) => model.id),
           'modelId',
         );
       if (params.has('environment'))
@@ -394,11 +459,31 @@ export function createMockApi(options: { latency?: number } = {}) {
       );
       const search = (params.get('q') ?? '').trim().toLocaleLowerCase();
       if (search.length > 120) bad('搜索最多 120 字');
+      const owner = params.has('owner')
+        ? stringField(params.get('owner'), 'owner', 1, 60)
+        : undefined;
+      const attributeKey = params.get('attributeKey'),
+        attributeValue = params.get('attributeValue');
+      if (attributeKey !== null || attributeValue !== null) {
+        if (
+          !query.modelId ||
+          !attributeKey ||
+          attributeValue === null ||
+          attributeValue.length > 120 ||
+          !models
+            .find((model) => model.id === query.modelId)
+            ?.fields.some((field) => field.key === attributeKey)
+        )
+          bad('属性查询需要有效模型、字段与等值条件');
+      }
       const items = store.cis.filter(
         (ci) =>
           (!query.modelId || ci.modelId === query.modelId) &&
           (!query.environment || ci.environment === query.environment) &&
           (!query.status || ci.status === query.status) &&
+          (!owner || ci.owner === owner) &&
+          (!attributeKey ||
+            String(ci.attributes[attributeKey] ?? '') === attributeValue) &&
           (!search ||
             `${ci.name} ${ci.externalKey} ${ci.owner}`
               .toLocaleLowerCase()
@@ -413,7 +498,7 @@ export function createMockApi(options: { latency?: number } = {}) {
       return { status: 200, data: paginate(items, params) };
     }
     if (pathname === '/api/v1/cis' && method === 'POST')
-      return { status: 201, data: create(ciInput(body)) };
+      return { status: 201, data: create(ciInput(body, models, store.cis)) };
     const match = /^\/api\/v1\/cis\/([^/]+)$/.exec(pathname);
     if (match && (method === 'GET' || method === 'PATCH')) {
       const ci = findCI(decodeURIComponent(match[1]!));
@@ -435,15 +520,21 @@ export function createMockApi(options: { latency?: number } = {}) {
           'REVISION_CONFLICT',
           '配置项已更新，请关闭编辑并刷新详情后重试',
         );
-      const input = ciInput({
-        name: update.name,
-        owner: update.owner,
-        environment: update.environment,
-        status: update.status,
-        attributes: update.attributes,
-        externalKey: ci.externalKey,
-        modelId: ci.modelId,
-      });
+      const input = ciInput(
+        {
+          name: update.name,
+          owner: update.owner,
+          environment: update.environment,
+          status: update.status,
+          attributes: update.attributes,
+          externalKey: ci.externalKey,
+          modelId: ci.modelId,
+        },
+        models,
+        store.cis,
+        ci,
+      );
+      uniqueAttributes(input, models, store.cis, ci.id);
       const changed = {
         ...ci,
         ...input,
@@ -483,6 +574,13 @@ export function createMockApi(options: { latency?: number } = {}) {
       if (source.id === target.id) bad('配置项不能与自身建立关系');
       if (source.status === 'retired' || target.status === 'retired')
         bad('退役配置项不能新增关系');
+      const rule = rules.find(
+        (rule) =>
+          rule.sourceModelId === source.modelId &&
+          rule.targetModelId === target.modelId &&
+          rule.type === relation.type,
+      );
+      if (!rule) bad('该模型组合尚未定义此关系，请先配置模型关系规则');
       if (
         store.relations.some(
           (item) =>
@@ -497,6 +595,7 @@ export function createMockApi(options: { latency?: number } = {}) {
         id: id('rel'),
         createdAt: new Date().toISOString(),
       };
+      relationRuleValid(rule!, [...store.relations, result], store.cis);
       store.relations.unshift(result);
       for (const endpoint of [source, target])
         log(
@@ -542,8 +641,32 @@ export function createMockApi(options: { latency?: number } = {}) {
         pathname === '/api/v1/imports') &&
       method === 'POST'
     ) {
-      const preview = importPreview(body, store.cis);
-      if (pathname.endsWith('/preview')) return { status: 200, data: preview };
+      const request = importRequest(body);
+      if (
+        !pathname.endsWith('/preview') &&
+        (request.mode === 'upsert' || request.previewId)
+      ) {
+        const prior = request.previewId
+          ? previews.get(request.previewId)
+          : undefined;
+        if (
+          !prior ||
+          prior.epoch !== epoch ||
+          prior.signature !== importSignature(request)
+        )
+          throw new Problem(
+            409,
+            'PREVIEW_STALE',
+            '预览已失效，请重新校验并确认差异',
+          );
+      }
+      const preview = previewImport(request, store.cis, models);
+      if (pathname.endsWith('/preview')) {
+        const previewId = id('preview');
+        if (previews.size >= 20) previews.delete(previews.keys().next().value!);
+        previews.set(previewId, { epoch, signature: importSignature(request) });
+        return { status: 200, data: { ...preview, previewId } };
+      }
       if (preview.invalidCount)
         throw new Problem(
           422,
@@ -551,8 +674,51 @@ export function createMockApi(options: { latency?: number } = {}) {
           '导入包含无效行，未写入任何数据',
           { csv: '重新预览并修复所有行后提交' },
         );
-      const ids = preview.rows.map((row) => create(row.input!, 'imported').id);
-      return { status: 201, data: { ids, createdCount: ids.length } };
+      const ids: string[] = [];
+      for (const row of preview.rows) {
+        const input = row.input!,
+          existing = store.cis.find(
+            (ci) => ci.externalKey === input.externalKey,
+          );
+        if (row.action === 'unchanged') {
+          ids.push(existing!.id);
+          continue;
+        }
+        const source = {
+          kind: 'csv' as const,
+          label: 'CSV 演示导入',
+          at: new Date().toISOString(),
+        };
+        if (existing) {
+          const changed: CI = {
+            ...existing,
+            ...input,
+            source,
+            revision: existing.revision + 1,
+            updatedAt: source.at,
+          };
+          store.cis[store.cis.indexOf(existing)] = changed;
+          log(
+            existing.id,
+            'imported',
+            `CSV 更新 ${changed.name} · ${row.changes?.map((change) => change.field).join(', ')} · 版本 ${changed.revision}`,
+          );
+          ids.push(existing.id);
+        } else {
+          const ci = create(input, 'imported');
+          ci.source = source;
+          ids.push(ci.id);
+        }
+      }
+      return {
+        status: 201,
+        data: {
+          ids,
+          createdCount: preview.createdCount,
+          updatedCount: preview.updatedCount,
+          unchangedCount: preview.unchangedCount,
+        },
+      };
     }
     throw new Problem(404, 'NOT_FOUND', 'API 路径或方法不存在');
   }
@@ -569,6 +735,8 @@ export function createMockApi(options: { latency?: number } = {}) {
         );
       }
       const result = route(request);
+      if (request.method !== 'GET' && !request.path.endsWith('/preview'))
+        epoch++;
       return {
         status: result.status,
         body: structuredClone({ data: result.data, requestId }),
@@ -595,6 +763,14 @@ export function createMockApi(options: { latency?: number } = {}) {
     },
     reset: () => {
       store = seedData();
+      models = structuredClone(seedModels).map((model) => ({
+        ...model,
+        revision: 1,
+      }));
+      rules = seedRules();
+      views = [];
+      epoch++;
+      previews.clear();
       fail = false;
     },
   };

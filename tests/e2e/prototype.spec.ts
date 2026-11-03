@@ -10,6 +10,10 @@ test('create, edit, relate and retire a configuration item', async ({
   await expect(
     page.getByRole('button', { name: '示例应用节点 01' }),
   ).toBeVisible();
+  const queryBounds = await page
+    .getByRole('search', { name: '配置项查询' })
+    .boundingBox();
+  expect(queryBounds?.width).toBeGreaterThan(600);
   await page.getByRole('button', { name: '新建配置项', exact: true }).click();
   const editor = page.getByRole('dialog', { name: '新建配置项' });
   await editor
@@ -97,6 +101,11 @@ test('mobile navigation and overview fit a narrow viewport', async ({
   await expect(
     page.getByRole('link', { name: '建立 示例订单服务', exact: true }),
   ).toBeVisible();
+  await page.getByRole('button', { name: '收起导航', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: '展开导航', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: '展开导航', exact: true }).click();
   await page.screenshot({
     path: 'artifacts/overview-desktop.png',
     fullPage: true,
@@ -104,13 +113,13 @@ test('mobile navigation and overview fit a narrow viewport', async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: '让每一项资源，都有清晰的来处' }),
+    page.getByRole('heading', { name: '配置总览', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: '打开导航' }).click();
   const nav = page.getByRole('dialog');
   await nav.getByRole('link', { name: '资源模型' }).click();
   await expect(
-    page.getByRole('heading', { name: '模型，够用就好' }),
+    page.getByRole('heading', { name: '资源模型', exact: true }),
   ).toBeVisible();
   await expect(page.getByText('ipAddress', { exact: true })).toBeVisible();
   await page.screenshot({
@@ -122,4 +131,16 @@ test('mobile navigation and overview fit a narrow viewport', async ({
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+  await page.getByRole('button', { name: '打开导航' }).click();
+  await page
+    .getByRole('dialog')
+    .getByRole('link', { name: '资源清单', exact: true })
+    .click();
+  await expect(page.getByText('共 6 个配置项')).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: 'artifacts/cis-mobile.png', fullPage: true });
 });

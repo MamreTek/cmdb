@@ -1,11 +1,4 @@
-import {
-  ArrowRightOutlined,
-  ApartmentOutlined,
-  CheckCircleOutlined,
-  DatabaseOutlined,
-  NodeIndexOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
@@ -13,11 +6,12 @@ import {
   Row,
   Skeleton,
   Space,
+  Statistic,
   Table,
-  Tag,
   Typography,
 } from 'antd';
 import { Link, useNavigate } from 'react-router';
+import type { CIModel } from '../shared/api/contracts';
 import { useRuntime } from '../shared/api/runtime';
 import { useResource } from '../shared/useResource';
 import { EmptyState, FailureNotice, PageTitle, time } from '../shared/ui';
@@ -34,9 +28,8 @@ export function Overview() {
   return (
     <>
       <PageTitle
-        eyebrow="CONFIGURATION MANAGEMENT"
-        title="让每一项资源，都有清晰的来处"
-        description="从资源、负责人到服务依赖，建立团队共享的配置视图。"
+        title="配置总览"
+        description="查看配置项数量、生命周期、模型分布和最近变更。"
         extra={
           <>
             <Button onClick={() => navigate('/import')}>导入配置项</Button>
@@ -60,114 +53,93 @@ export function Overview() {
           <>
             <Row gutter={[16, 16]} className="metrics">
               {[
-                [
-                  '配置项总数',
-                  summary.total,
-                  <DatabaseOutlined key="all" />,
-                  '所有模型与环境',
-                ],
-                [
-                  '使用中',
-                  summary.active,
-                  <CheckCircleOutlined key="active" />,
-                  '当前处于使用中的资源',
-                ],
-                [
-                  '资源关系',
-                  summary.relations,
-                  <NodeIndexOutlined key="relations" />,
-                  '有方向、可追溯的依赖',
-                ],
-                [
-                  '预置模型',
-                  models?.length ?? 0,
-                  <ApartmentOutlined key="models" />,
-                  '开箱即用，按需建档',
-                ],
-              ].map(([label, count, icon, note], index) => (
-                <Col xs={12} xl={6} key={index}>
+                {
+                  label: '配置项总数',
+                  value: summary.total,
+                  note: '全部模型与环境',
+                  path: '/cis',
+                },
+                {
+                  label: '使用中配置项',
+                  value: summary.active,
+                  note: '生命周期：使用中',
+                  path: '/cis?status=active',
+                },
+                {
+                  label: '资源关系',
+                  value: summary.relations,
+                  note: '依赖关系与运行关系',
+                  path: '/relations',
+                },
+                {
+                  label: '资源模型',
+                  value: models?.length ?? 0,
+                  note: '预置模板与自定义模型',
+                  path: '/models',
+                },
+              ].map((item) => (
+                <Col xs={12} xl={6} key={item.label}>
                   <Card>
-                    <div className="metric-icon">{icon}</div>
-                    <div className="metric-label">{label}</div>
-                    <div className="metric-value">{count}</div>
-                    <span className="muted">{note}</span>
+                    <Statistic title={item.label} value={item.value} />
+                    <div className="stat-footer">
+                      <Typography.Text type="secondary">
+                        {item.note}
+                      </Typography.Text>
+                      <Link to={item.path}>查看</Link>
+                    </div>
                   </Card>
                 </Col>
               ))}
             </Row>
-            <Card className="getting-started">
-              <div>
-                <Tag color="blue">从第一条记录开始</Tag>
-                <Typography.Title level={4}>
-                  用一个简单流程，把资源串起来
-                </Typography.Title>
-                <Typography.Paragraph type="secondary">
-                  选择模型 → 录入配置项 → 指定负责人 →
-                  建立关系。无需先配置复杂平台。
-                </Typography.Paragraph>
-              </div>
-              <Button
-                type="primary"
-                ghost
-                icon={<ArrowRightOutlined />}
-                onClick={() => navigate('/cis')}
-              >
-                浏览资源清单
-              </Button>
+            <Card
+              title="模型分布"
+              extra={<Link to="/models">模型与字段</Link>}
+              className="table-card overview-section"
+            >
+              <Table<CIModel>
+                rowKey="id"
+                dataSource={models}
+                pagination={false}
+                size="middle"
+                scroll={{ x: 660 }}
+                columns={[
+                  { title: '模型名称', dataIndex: 'name', width: 140 },
+                  {
+                    title: '模型标识',
+                    dataIndex: 'id',
+                    width: 140,
+                    render: (id: string) => (
+                      <Typography.Text code>{id}</Typography.Text>
+                    ),
+                  },
+                  {
+                    title: '配置项数量',
+                    key: 'count',
+                    width: 120,
+                    render: (_, model) => summary.modelCounts[model.id],
+                  },
+                  { title: '说明', dataIndex: 'description' },
+                  {
+                    title: '操作',
+                    key: 'actions',
+                    width: 130,
+                    render: (_, model) => (
+                      <Link to={`/cis?modelId=${model.id}`}>查看配置项</Link>
+                    ),
+                  },
+                ]}
+              />
             </Card>
-            <div className="section-heading">
-              <Typography.Title level={4}>按模型管理</Typography.Title>
-              <Link to="/models">
-                查看模型与字段 <ArrowRightOutlined />
-              </Link>
-            </div>
-            <Row gutter={[16, 16]}>
-              {models?.map((model) => (
-                <Col xs={24} md={8} key={model.id}>
-                  <Card
-                    hoverable
-                    onClick={() => navigate(`/cis?modelId=${model.id}`)}
-                  >
-                    <Space>
-                      <div className="model-mark">
-                        {model.id === 'host'
-                          ? 'H'
-                          : model.id === 'service'
-                            ? 'S'
-                            : 'D'}
-                      </div>
-                      <Typography.Title level={5} style={{ margin: 0 }}>
-                        {model.name}
-                      </Typography.Title>
-                      <Tag>{summary.modelCounts[model.id]} 项</Tag>
-                    </Space>
-                    <p className="muted model-description">
-                      {model.description}
-                    </p>
-                    <Button
-                      type="link"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void navigate(`/cis?modelId=${model.id}`);
-                      }}
-                    >
-                      查看配置项 <ArrowRightOutlined />
-                    </Button>
-                  </Card>
-                </Col>
-              ))}
-            </Row>
-            <div className="section-heading">
-              <Typography.Title level={4}>最近变更</Typography.Title>
-              <Link to="/changes">
-                全部变更 <ArrowRightOutlined />
-              </Link>
-            </div>
-            <Card className="table-card">
+            <Card
+              title="最近变更"
+              extra={<Link to="/changes">全部变更</Link>}
+              className="table-card overview-section"
+            >
               <Table
                 rowKey="id"
                 dataSource={changes?.items}
                 pagination={false}
+                size="middle"
                 locale={{ emptyText: <EmptyState text="暂无变更" /> }}
                 scroll={{ x: 620 }}
                 columns={[
@@ -183,6 +155,11 @@ export function Overview() {
                 ]}
               />
             </Card>
+            <Space className="overview-note">
+              <Typography.Text type="secondary">
+                统计与操作记录均来自当前 Mock 会话；刷新页面后重置。
+              </Typography.Text>
+            </Space>
           </>
         )
       )}

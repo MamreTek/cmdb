@@ -44,6 +44,33 @@ function update(
 }
 
 describe('CMDB contract and behavior', () => {
+  it('creates unique UUIDs on LAN HTTP origins without crypto.randomUUID', async () => {
+    const originalCrypto = globalThis.crypto;
+    vi.stubGlobal('crypto', {
+      getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
+    });
+    try {
+      const { api } = setup();
+      const first = await api.create(input);
+      const second = await api.create({
+        ...input,
+        externalKey: 'demo.lan-second',
+      });
+      expect(first.id).toMatch(
+        /^ci-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+      );
+      expect(second.id).not.toBe(first.id);
+      const relation = await api.addRelation({
+        sourceId: first.id,
+        targetId: second.id,
+        type: 'depends_on',
+      });
+      expect(relation.id).toMatch(/^rel-/);
+      expect((await api.changes({ ciId: first.id })).total).toBe(2);
+    } finally {
+      vi.stubGlobal('crypto', originalCrypto);
+    }
+  });
   it.each(examples)(
     'replays the documented example: $name',
     async (example) => {

@@ -5,6 +5,8 @@ import {
   HistoryOutlined,
   ImportOutlined,
   MenuOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   NodeIndexOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -103,9 +105,8 @@ function Brand() {
       </div>
       <div>
         <strong>CMDB</strong>
-        <span>MAMRETEK</span>
+        <span>MamreTek</span>
       </div>
-      <Tag>α</Tag>
     </Link>
   );
 }
@@ -114,7 +115,8 @@ function Shell() {
   const { message, modal } = App.useApp();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false),
-    [generation, setGeneration] = useState(0);
+    [generation, setGeneration] = useState(0),
+    [collapsed, setCollapsed] = useState(false);
   function reset() {
     modal.confirm({
       title: '重置所有演示改动？',
@@ -130,7 +132,7 @@ function Shell() {
   }
   const menu = (
     <Menu
-      theme="dark"
+      theme="light"
       mode="inline"
       selectedKeys={[location.pathname]}
       items={navigation}
@@ -138,55 +140,71 @@ function Shell() {
     />
   );
   return (
-    <Layout className="app-layout">
-      <Layout.Sider width={224} className="desktop-sidebar">
-        <Brand />
-        <div className="nav-label">配置管理</div>
+    <Layout
+      hasSider={false}
+      className={`app-layout${collapsed ? ' sidebar-collapsed' : ''}`}
+    >
+      <Layout.Header className="topbar">
+        <Space>
+          <Button
+            className="mobile-menu-button"
+            aria-label="打开导航"
+            icon={<MenuOutlined />}
+            onClick={() => setMobileOpen(true)}
+          />
+          <Brand />
+          <Typography.Text className="topbar-module">配置管理</Typography.Text>
+        </Space>
+        <Space wrap className="demo-controls">
+          <Tag>演示环境</Tag>
+          <Button
+            size="small"
+            onClick={() => {
+              demo.failNext();
+              void message.info('下一次 API 请求将模拟失败，随后可重试');
+            }}
+          >
+            模拟下次失败
+          </Button>
+          <Button size="small" icon={<ReloadOutlined />} onClick={reset}>
+            重置演示
+          </Button>
+        </Space>
+      </Layout.Header>
+      <Layout.Sider
+        width={208}
+        collapsed={collapsed}
+        collapsedWidth={56}
+        trigger={null}
+        className="desktop-sidebar"
+      >
+        {!collapsed && <div className="nav-label">配置管理</div>}
         {menu}
-        <div className="sidebar-note">
-          <span className="online-dot" />
-          独立可用 · 组合更强<p>让资源成为团队的共同语言。</p>
+        <div className="sidebar-bottom">
+          {!collapsed && (
+            <Typography.Text type="secondary">
+              MamreTek · 产品原型
+            </Typography.Text>
+          )}
+          <Button
+            type="text"
+            aria-label={collapsed ? '展开导航' : '收起导航'}
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setCollapsed((value) => !value)}
+          />
         </div>
       </Layout.Sider>
       <Drawer
         className="mobile-nav"
-        title={<Brand />}
+        title="CMDB · 配置管理"
         open={mobileOpen}
         placement="left"
         onClose={() => setMobileOpen(false)}
-        size={280}
+        size={240}
       >
         {menu}
       </Drawer>
       <Layout className="main-layout">
-        <Layout.Header className="topbar">
-          <Space>
-            <Button
-              className="mobile-menu-button"
-              aria-label="打开导航"
-              icon={<MenuOutlined />}
-              onClick={() => setMobileOpen(true)}
-            />
-            <Typography.Text type="secondary">
-              MamreTek <span className="breadcrumb-divider">/</span> 配置管理
-            </Typography.Text>
-          </Space>
-          <Space wrap className="demo-controls">
-            <Tag color="blue">本地演示空间</Tag>
-            <Button
-              size="small"
-              onClick={() => {
-                demo.failNext();
-                void message.info('下一次 API 请求将模拟失败，随后可重试');
-              }}
-            >
-              模拟下次失败
-            </Button>
-            <Button size="small" icon={<ReloadOutlined />} onClick={reset}>
-              重置演示
-            </Button>
-          </Space>
-        </Layout.Header>
         <div className="prototype-notice">
           <Alert
             type="warning"
@@ -229,23 +247,29 @@ export function CMDBApp({ runtime }: { runtime?: Runtime }) {
       locale={zhCN}
       theme={{
         token: {
-          colorPrimary: '#2858d6',
-          colorInfo: '#2858d6',
-          colorBgLayout: '#f4f6fa',
-          borderRadius: 10,
+          colorPrimary: '#1677ff',
+          colorInfo: '#1677ff',
+          colorBgLayout: '#f5f5f5',
+          colorText: 'rgba(0, 0, 0, 0.88)',
+          borderRadius: 6,
           fontFamily:
             'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
           fontSize: 14,
         },
         components: {
-          Layout: { siderBg: '#12223b', headerBg: '#ffffff' },
+          Layout: { siderBg: '#ffffff', headerBg: '#ffffff' },
           Menu: {
-            darkItemBg: '#12223b',
-            darkItemSelectedBg: '#264373',
-            darkItemSelectedColor: '#ffffff',
+            itemBorderRadius: 4,
+            itemSelectedBg: '#e6f4ff',
+            itemSelectedColor: '#1677ff',
           },
           Button: { primaryShadow: 'none' },
-          Table: { headerBg: '#f8fafc' },
+          Table: {
+            headerBg: '#fafafa',
+            cellPaddingBlock: 12,
+            cellPaddingInline: 16,
+          },
+          Card: { headerFontSize: 16 },
         },
       }}
     >

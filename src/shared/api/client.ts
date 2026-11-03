@@ -8,6 +8,12 @@ import type {
   Change,
   Failure,
   ImportPreview,
+  ImportRequest,
+  FieldChange,
+  SchemaPreview,
+  RelationRule,
+  RelationRuleInput,
+  SavedView,
   Page,
   Relation,
   RelationInput,
@@ -50,7 +56,8 @@ export function createHttpTransport(fetcher: typeof fetch = fetch): Transport {
 function queryString(query: object): string {
   const result = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== '') result.set(key, String(value));
+    if (value !== undefined && (value !== '' || key === 'attributeValue'))
+      result.set(key, String(value));
   }
   return result.size ? `?${result.toString()}` : '';
 }
@@ -122,6 +129,37 @@ export class ApiClient {
   }
 
   models = () => this.request<CIModel[]>('GET', '/models');
+  createModel = (input: { id: string; name: string; description: string }) =>
+    this.request<CIModel>('POST', '/models', input);
+  previewField = (id: string, input: FieldChange) =>
+    this.request<SchemaPreview>(
+      'POST',
+      `/models/${encodeURIComponent(id)}/fields/preview`,
+      input,
+    );
+  addField = (id: string, input: FieldChange) =>
+    this.request<CIModel>(
+      'POST',
+      `/models/${encodeURIComponent(id)}/fields`,
+      input,
+    );
+  relationRules = () => this.request<RelationRule[]>('GET', '/relation-rules');
+  createRule = (input: RelationRuleInput) =>
+    this.request<RelationRule>('POST', '/relation-rules', input);
+  updateRule = (
+    id: string,
+    input: Pick<RelationRule, 'revision' | 'cardinality'>,
+  ) =>
+    this.request<RelationRule>(
+      'PATCH',
+      `/relation-rules/${encodeURIComponent(id)}`,
+      input,
+    );
+  views = () => this.request<SavedView[]>('GET', '/views');
+  saveView = (input: { name: string; query: CIQuery }) =>
+    this.request<SavedView>('POST', '/views', input);
+  removeView = (id: string) =>
+    this.request<{ id: string }>('DELETE', `/views/${encodeURIComponent(id)}`);
   summary = () => this.request<Summary>('GET', '/summary');
   list = (query: CIQuery = {}) =>
     this.request<Page<CI>>('GET', `/cis${queryString(query)}`);
@@ -162,12 +200,19 @@ export class ApiClient {
     );
   changes = (query: { ciId?: string; page?: number; pageSize?: number } = {}) =>
     this.request<Page<Change>>('GET', `/changes${queryString(query)}`);
-  previewImport = (csv: string) =>
-    this.request<ImportPreview>('POST', '/imports/preview', { csv });
-  import = (csv: string) =>
-    this.request<{ ids: string[]; createdCount: number }>('POST', '/imports', {
-      csv,
-    });
+  previewImport = (input: string | ImportRequest) =>
+    this.request<ImportPreview>(
+      'POST',
+      '/imports/preview',
+      typeof input === 'string' ? { csv: input } : input,
+    );
+  import = (input: string | ImportRequest) =>
+    this.request<{
+      ids: string[];
+      createdCount: number;
+      updatedCount: number;
+      unchangedCount: number;
+    }>('POST', '/imports', typeof input === 'string' ? { csv: input } : input);
 }
 
 export function errorText(error: unknown): string {

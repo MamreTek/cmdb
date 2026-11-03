@@ -21,6 +21,7 @@ import { relationLabels } from '../shared/api/contracts';
 import { useRuntime } from '../shared/api/runtime';
 import { useResource } from '../shared/useResource';
 import { EmptyState, FailureNotice, PageTitle, time } from '../shared/ui';
+import { ServiceTree } from './service-tree';
 
 export function RelationEditor({
   cis,
@@ -38,6 +39,9 @@ export function RelationEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const selectedSource = Form.useWatch('sourceId', form) as string | undefined;
+  const selectedType = Form.useWatch('type', form) as
+    RelationInput['type'] | undefined;
+  const rules = useResource(() => api.relationRules(), 'relation-editor-rules');
   const options = cis
     .filter((ci) => ci.status !== 'retired')
     .map((ci) => ({ value: ci.id, label: `${ci.name} · ${ci.externalKey}` }));
@@ -61,6 +65,7 @@ export function RelationEditor({
       okText="保存关系"
       cancelText="取消"
       confirmLoading={busy}
+      okButtonProps={{ disabled: !rules.data }}
       closable={!busy}
       mask={{ closable: false }}
       onCancel={() => {
@@ -71,6 +76,9 @@ export function RelationEditor({
       <Typography.Paragraph type="secondary">
         关系从源指向目标，例如“业务服务 运行于 主机”。退役资源不能新增关系。
       </Typography.Paragraph>
+      {rules.error ? (
+        <FailureNotice error={rules.error} retry={rules.reload} />
+      ) : null}
       {error ? (
         <div className="inline-error" role="alert">
           {errorText(error)}
@@ -81,7 +89,7 @@ export function RelationEditor({
         layout="vertical"
         initialValues={{ sourceId, type: 'depends_on' }}
         onFinish={(value) => void save(value)}
-        disabled={busy}
+        disabled={busy || !rules.data}
       >
         <Form.Item
           name="sourceId"
@@ -97,6 +105,7 @@ export function RelationEditor({
         </Form.Item>
         <Form.Item name="type" label="关系类型" rules={[{ required: true }]}>
           <Select
+            onChange={() => form.resetFields(['targetId'])}
             options={Object.entries(relationLabels).map(([value, label]) => ({
               value,
               label,
@@ -112,7 +121,16 @@ export function RelationEditor({
             showSearch
             optionFilterProp="label"
             options={options.filter(
-              (option) => option.value !== selectedSource,
+              (option) =>
+                option.value !== selectedSource &&
+                rules.data?.some(
+                  (rule) =>
+                    rule.sourceModelId ===
+                      cis.find((ci) => ci.id === selectedSource)?.modelId &&
+                    rule.targetModelId ===
+                      cis.find((ci) => ci.id === option.value)?.modelId &&
+                    rule.type === selectedType,
+                ),
             )}
           />
         </Form.Item>
@@ -217,17 +235,22 @@ export function RelationsPage() {
   const [selected, setSelected] = useState<string>();
   const [editing, setEditing] = useState(false);
   const resource = useResource(
-    () => Promise.all([api.allCIs(), api.relations(selected)]),
+    () => Promise.all([api.allCIs(), api.relations()]),
     `relations:${selected ?? ''}`,
   );
-  const [cis, relations] = resource.data ?? [];
+  const [cis, allRelations] = resource.data ?? [];
+  const relations = allRelations?.filter(
+    (relation) =>
+      !selected ||
+      relation.sourceId === selected ||
+      relation.targetId === selected,
+  );
   const names = new Map(cis?.map((ci) => [ci.id, ci.name]));
   return (
     <>
       <PageTitle
-        eyebrow="RESOURCE RELATIONSHIPS"
-        title="从单点资源，到业务关系"
-        description="把依赖方向说清楚。这里只维护配置关系，不执行任务或自动影响关联资源。"
+        title="资源关系"
+        description="维护配置项之间的依赖和运行关系，不执行任务或联动修改关联资源。"
         extra={
           <Button
             type="primary"
@@ -261,6 +284,7 @@ export function RelationsPage() {
         <Skeleton active />
       ) : (
         <>
+          <ServiceTree cis={cis ?? []} relations={allRelations ?? []} />
           <Card title="关系视图" className="relation-map">
             {relations?.length ? (
               <div className="edge-list">

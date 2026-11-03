@@ -31,6 +31,89 @@ function shell(children: ReactNode, runtime: Runtime) {
   );
 }
 describe('prototype workflows', () => {
+  it('submits typed custom fields without losing zero or false values', async () => {
+    const runtime = createRuntime(0),
+      user = userEvent.setup(),
+      onSaved = vi.fn();
+    await runtime.api.createModel({
+      id: 'middleware',
+      name: '中间件',
+      description: '',
+    });
+    const definitions = [
+      { key: 'note', label: '备注', type: 'text' as const },
+      { key: 'capacity', label: '容量', type: 'number' as const },
+      { key: 'managed', label: '托管', type: 'boolean' as const },
+      { key: 'renewal', label: '有效期', type: 'date' as const },
+      {
+        key: 'tier',
+        label: '等级',
+        type: 'enum' as const,
+        options: ['A', 'B'],
+      },
+      {
+        key: 'hostRef',
+        label: '宿主机',
+        type: 'reference' as const,
+        referenceModelId: 'host',
+      },
+    ];
+    for (const [index, field] of definitions.entries())
+      await runtime.api.addField('middleware', {
+        revision: index + 1,
+        field: { ...field, description: '', required: true },
+      });
+    render(
+      shell(
+        <CIEditor
+          ci={null}
+          models={await runtime.api.models()}
+          onClose={vi.fn()}
+          onSaved={onSaved}
+        />,
+        runtime,
+      ),
+    );
+    const dialog = within(await screen.findByRole('dialog'));
+    await user.click(dialog.getByLabelText('资源模型'));
+    await user.click(
+      screen.getByText('中间件', {
+        selector: '.ant-select-item-option-content',
+      }),
+    );
+    for (const [label, value] of Object.entries({
+      资源标识: 'demo.typed-ui',
+      名称: '示例中间件',
+      '负责人 / 团队': '示例团队',
+      备注: '虚构资料',
+    }))
+      fireEvent.change(dialog.getByLabelText(label), { target: { value } });
+    fireEvent.change(dialog.getByLabelText('容量'), { target: { value: '0' } });
+    await user.click(dialog.getByRole('radio', { name: '否 (false)' }));
+    fireEvent.change(dialog.getByLabelText('有效期'), {
+      target: { value: '2028-02-29' },
+    });
+    await user.click(dialog.getByLabelText('等级'));
+    await user.click(
+      screen.getByText('A', { selector: '.ant-select-item-option-content' }),
+    );
+    await user.click(dialog.getByLabelText('宿主机'));
+    await user.click(
+      await screen.findByText('示例应用节点 01 · demo.web-01', {
+        selector: '.ant-select-item-option-content',
+      }),
+    );
+    await user.click(dialog.getByRole('button', { name: '保存配置项' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    expect(onSaved.mock.calls[0]?.[0].attributes).toEqual({
+      note: '虚构资料',
+      capacity: 0,
+      managed: false,
+      renewal: '2028-02-29',
+      tier: 'A',
+      hostRef: 'ci-demo-host-01',
+    });
+  });
   it('keeps a failed CI submission editable and succeeds when retried', async () => {
     const runtime = createRuntime(0),
       onSaved = vi.fn(),
