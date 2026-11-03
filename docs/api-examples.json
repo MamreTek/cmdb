@@ -1,0 +1,56 @@
+[
+  {
+    "name": "Seeded summary",
+    "request": { "method": "GET", "path": "/api/v1/summary" },
+    "response": {
+      "status": 200,
+      "body": {
+        "data": {
+          "total": 6,
+          "active": 4,
+          "relations": 2,
+          "modelCounts": { "host": 3, "service": 2, "database": 1 }
+        },
+        "requestId": "mock-1"
+      }
+    }
+  },
+  {
+    "name": "Missing configuration item",
+    "request": { "method": "GET", "path": "/api/v1/cis/missing" },
+    "response": {
+      "status": 404,
+      "body": {
+        "error": { "code": "NOT_FOUND", "message": "配置项不存在" },
+        "requestId": "mock-1"
+      }
+    }
+  },
+  {
+    "name": "Duplicate external identifier",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/cis",
+      "body": {
+        "externalKey": "demo.web-01",
+        "name": "示例重复资源",
+        "modelId": "host",
+        "owner": "示例团队",
+        "environment": "staging",
+        "status": "active",
+        "attributes": {}
+      }
+    },
+    "response": {
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "DUPLICATE_KEY",
+          "message": "资源标识已经存在",
+          "fields": { "externalKey": "请使用不同的资源标识" }
+        },
+        "requestId": "mock-1"
+      }
+    }
+  }
+]
